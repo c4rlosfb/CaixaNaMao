@@ -1,0 +1,25 @@
+# Java binaries/compiled files
+*.class
+*.jar
+*.war
+*.ear
+*.nar
+*.log
+target/
+build/
+out/
+
+# Python virtual environments
+venv/
+.venv/
+ENV/
+env/
+
+# Environment files
+.env
+.env.*
+
+# IDE settings
+.vscode/
+.idea/
+*.iml

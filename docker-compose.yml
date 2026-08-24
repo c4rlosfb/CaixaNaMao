@@ -1,0 +1,29 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: caixanamao
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+  # servico-pedidos:
+  #   build:
+  #     context: ./servico-pedidos
+  #     dockerfile: Dockerfile
+
+  # servico-estoque:
+  #   build:
+  #     context: ./servico-estoque
+  #     dockerfile: Dockerfile
+
+  # servico-autenticacao:
+  #   build:
+  #     context: ./servico-autenticacao
+  #     dockerfile: Dockerfile
