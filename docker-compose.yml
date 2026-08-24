@@ -2,9 +2,9 @@ services:
   postgres:
     image: postgres:16
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: caixanamao
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no seu ambiente (ex.: arquivo .env não versionado)}
+      POSTGRES_DB: ${POSTGRES_DB:-caixanamao}
     ports:
       - "5432:5432"
 
