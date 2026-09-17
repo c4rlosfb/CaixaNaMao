@@ -4,7 +4,7 @@
 > **Sprint:** 1  
 > **Autor:** c4rlosfb  
 > **Status:** Aprovado pela equipe  
-> **Última atualização:** 2026-09-15
+> **Última atualização:** 2026-09-17
 
 Cada ADR segue o formato: **Contexto → Decisão → Justificativa → Consequências → Alternativas rejeitadas**.
 
@@ -23,8 +23,11 @@ latência-sensível do sistema.
 
 ### Decisão
 
-Toda comunicação **serviço-a-serviço** utilizará **gRPC** com contratos definidos em
+A comunicação **síncrona entre `servico-pedidos` e `servico-estoque`** utilizará **gRPC** com contratos definidos em
 Protocol Buffers (`.proto`) centralizados na pasta `shared-protos/`.
+
+Escopo desta decisão: a chamada crítica `CheckAndReserve` (Pedidos → Estoque). A comunicação entre outros serviços
+(ex: validação de JWT no `servico-pedidos`) usa validação local HS256, sem chamada de rede adicional.
 
 ### Justificativa
 
@@ -120,6 +123,11 @@ Cada serviço conecta-se **somente ao seu database** usando um usuário PostgreS
 com permissões restritas (`GRANT` mínimo). Nenhum serviço conhece ou acessa o
 database do outro.
 
+> **Cuidado de bootstrap:** O PostgreSQL concede `CONNECT` a `PUBLIC` por padrão.
+> O script de inicialização deve executar `REVOKE CONNECT ON DATABASE <db> FROM PUBLIC`
+> em cada database e conceder acesso somente ao usuário correspondente, garantindo
+> que credenciais de um serviço não consigam conectar-se ao database de outro.
+
 ### Justificativa
 
 | Critério | Cluster Único + DBs Lógicos | 3 Servidores Distintos |
@@ -166,7 +174,7 @@ O `servico-estoque` implementará **distributed locking com Redis** usando o pad
 **SET NX EX** (equivalente ao algoritmo Redlock simplificado para single node):
 
 ```
-SETNX lock:estoque:{item_id}  {request_uuid}  EX 5
+SET lock:estoque:{item_id}  {request_uuid}  NX EX 5
 ```
 
 - `NX` garante que apenas uma requisição adquira o lock por vez
@@ -191,9 +199,13 @@ dependência adicional.
 
 - **Positivas:** Exclusão mútua garantida sem impacto no esquema do PostgreSQL; TTL previne deadlocks permanentes.
 - **Negativas:** Adiciona um hop de rede (Redis) no caminho crítico de reserva; se o Redis estiver indisponível, reservas são bloqueadas.
-- **Mitigação de indisponibilidade do Redis:** Circuit Breaker (Sprint 4) detectará falha e poderá degradar para `SELECT FOR UPDATE` no PostgreSQL como fallback.
-- **Cuidado de implementação:** A liberação do lock deve verificar que o `request_uuid` ainda é o dono antes de executar `DEL` (usar Lua script atômico).
-
+- **Mitigação de indisponibilidade do Redis:** Falhar fechado (fail closed) — não degradar para `SELECT FOR UPDATE` de forma isolada por instância, pois instâncias sem Redis poderiam reservar o mesmo item que outra com Redis ainda ativo. A consistência é garantida pela condição transacional no PostgreSQL (Sprint 2+).
+- **Cuidado de implementação:** A liberação do lock deve verificar que o `request_uuid` ainda é o dono antes de executar `DEL` — usar Lua script atômico:
+  ```
+  if redis.call('GET', KEYS[1]) == ARGV[1] then
+    return redis.call('DEL', KEYS[1])
+  end
+  ```
 ### Alternativas Rejeitadas
 
 - **`SELECT FOR UPDATE` no PostgreSQL:** Viável, mas mantém a transação aberta durante toda a operação, aumentando o tempo de lock no banco e reduzindo throughput sob alta concorrência.
@@ -225,6 +237,10 @@ Filas definidas na Sprint 1:
 |---|---|---|---|
 | `caixanamao-pedidos-criados` | Standard | servico-pedidos | 4 dias |
 | `caixanamao-estoque-atualizado` | Standard | servico-estoque | 4 dias |
+
+> **Garantia de entrega:** Filas Standard entregam **pelo menos uma vez** e **sem garantia de ordem**.
+> Consumidores futuros devem implementar idempotência via `event_id` único para evitar
+> processamento duplicado em caso de redelivery.
 
 ### Justificativa
 

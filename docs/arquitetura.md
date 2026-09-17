@@ -4,7 +4,7 @@
 > **Sprint:** 1  
 > **Autor:** c4rlosfb  
 > **Status:** Aprovado  
-> **Última atualização:** 2026-09-15
+> **Última atualização:** 2026-09-17
 
 ---
 
@@ -71,7 +71,7 @@ graph TB
     GW -->|Valida JWT| AU
     GW --> PH
     PH -->|gRPC CheckAndReserve| EH
-    EH -->|SETNX / EXPIRE| EL
+    EH -->|SET NX EX| EL
     EL --> RD
     EH --> EDB
     PH --> PDB
@@ -111,7 +111,7 @@ POST /auth/validate   → valida token (chamado internamente pelos outros servi�
 ```
 usuarios (id UUID PK, nome TEXT, email TEXT UNIQUE, senha_hash TEXT,
           criado_em TIMESTAMPTZ, ativo BOOLEAN)
-refresh_tokens (id UUID PK, usuario_id UUID FK, token TEXT UNIQUE,
+refresh_tokens (id UUID PK, usuario_id UUID FK, token_hash TEXT UNIQUE,
                 expira_em TIMESTAMPTZ, revogado BOOLEAN)
 ```
 
@@ -183,13 +183,20 @@ service EstoqueService {
 
 ```
 1. Recebe CheckAndReserve(item_id, quantidade)
-2. Tenta adquirir Redis Lock: SETNX lock:estoque:{item_id} {request_id} EX 5
+2. Tenta adquirir Redis Lock (atômico): SET lock:estoque:{item_id} {request_uuid} NX EX 5
 3. Se lock não adquirido → retorna ESTOQUE_BLOQUEADO (cliente faz retry)
 4. Dentro do lock:
-   a. Lê quantidade disponível em estoque_db
-   b. Se disponível >= quantidade solicitada → decrementa e persiste
+   a. Lê quantidade_disponivel em estoque_db (SELECT FOR UPDATE para consistência)
+   b. Se disponivel >= quantidade:
+      - quantidade_disponivel -= quantidade
+      - quantidade_reservada += quantidade
+      - Insere linha em movimentacoes (tipo='RESERVA', pedido_id, quantidade)
+      - Persiste atomicamente em transação PostgreSQL
    c. Se insuficiente → retorna ESTOQUE_INSUFICIENTE
-5. Libera lock (DEL lock:estoque:{item_id})
+5. Libera lock via Lua (atômico — verifica ownership antes de DEL):
+   if redis.call('GET', KEYS[1]) == ARGV[1] then
+     return redis.call('DEL', KEYS[1])
+   end
 6. Retorna resultado
 ```
 
@@ -211,8 +218,11 @@ movimentacoes (id UUID PK, item_id UUID FK, tipo TEXT,
 
 - Protocolo: HTTP/1.1 + JSON
 - Autenticação: Bearer JWT no header `Authorization`
-- Todos os terminais apontam exclusivamente para `servico-pedidos` (porta 8000)
-- O `servico-pedidos` valida o token delegando ao `servico-autenticacao`
+- Rotas de autenticação (registro, login, refresh) são acessadas diretamente em `servico-autenticacao` (porta 8001)
+- Rotas de negócio (pedidos) são acessadas em `servico-pedidos` (porta 8000)
+- O `servico-pedidos` **valida o JWT localmente** (HS256 com segredo compartilhado via variável de ambiente) — sem chamada de rede ao `servico-autenticacao` no caminho crítico
+
+> **Nota:** Não existe API Gateway até a Sprint 4 (#15). Até lá, os terminais conectam-se diretamente às portas 8000 e 8001.
 
 ### 4.2 gRPC (interna — serviço → serviço)
 
@@ -228,8 +238,8 @@ movimentacoes (id UUID PK, item_id UUID FK, tipo TEXT,
 
 | Fila | Produtor | Consumidor futuro |
 |---|---|---|
-| `pedidos-criados` | servico-pedidos | Notificações, Analytics |
-| `estoque-atualizado` | servico-estoque | Relatórios, Alertas de reposição |
+| `caixanamao-pedidos-criados` | servico-pedidos | Notificações, Analytics |
+| `caixanamao-estoque-atualizado` | servico-estoque | Relatórios, Alertas de reposição |
 
 ---
 
