@@ -1,25 +1,57 @@
-# Java binaries/compiled files
-*.class
-*.jar
-*.war
-*.ear
-*.nar
-*.log
-target/
-build/
-out/
+# =============================================================================
+# CaixaNaMao — .gitignore
+# =============================================================================
 
-# Python virtual environments
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+*.whl
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+*.cover
+
+# --- Stubs gerados pelo protoc (nunca versionar — gerados no build) ---
+*_pb2.py
+*_pb2_grpc.py
+*_pb2.pyi
+
+# --- Ambientes virtuais Python ---
 venv/
 .venv/
 ENV/
 env/
 
-# Environment files
+# --- Variáveis de ambiente (segredos) ---
 .env
 .env.*
+!.env.example
 
-# IDE settings
+# --- Docker ---
+*.log
+
+# --- Java (herdado do template inicial) ---
+*.class
+*.jar
+*.war
+*.ear
+*.nar
+target/
+out/
+
+# --- IDE ---
 .vscode/
 .idea/
 *.iml
+
+# --- macOS ---
+.DS_Store

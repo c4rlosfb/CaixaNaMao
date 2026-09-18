@@ -1,0 +1,48 @@
+# =============================================================================
+# Contexto de build do servico-pedidos
+# Mantém a imagem enxuta: nada de artefatos locais, caches, segredos ou VCS.
+# O contexto de build deste serviço é ./servico-pedidos (ver docker-compose.yml).
+# =============================================================================
+
+# --- Python: bytecode e artefatos de build ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# --- Ambientes virtuais locais ---
+venv/
+.venv/
+env/
+ENV/
+
+# --- Caches de testes e ferramentas ---
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+
+# --- Segredos e configuração local (entram por variável de ambiente) ---
+.env
+.env.*
+*.pem
+
+# --- Metadados de VCS, editores e SO ---
+.git/
+.gitignore
+.gitattributes
+.dockerignore
+Dockerfile*
+*.md
+docs/
+.DS_Store
+Thumbs.db
+*.swp
+*~

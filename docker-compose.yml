@@ -1,29 +1,111 @@
 services:
+
+  # ---------------------------------------------------------------------------
+  # Infraestrutura de dados
+  # ---------------------------------------------------------------------------
   postgres:
     image: postgres:16
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no seu ambiente (ex.: arquivo .env não versionado)}
-      POSTGRES_DB: ${POSTGRES_DB:-caixanamao}
+      POSTGRES_USER:     ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD no arquivo .env (nao versionado)}
+      POSTGRES_DB:       postgres  # database padrao; os databases de negocio sao criados pelo init-db.sql
+      # Credenciais dos usuarios isolados por servico
+      PEDIDOS_DB_PASSWORD:  ${PEDIDOS_DB_PASSWORD:-pedidos_pass}
+      ESTOQUE_DB_PASSWORD:  ${ESTOQUE_DB_PASSWORD:-estoque_pass}
+      AUTH_DB_PASSWORD:     ${AUTH_DB_PASSWORD:-auth_pass}
     ports:
       - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   redis:
-    image: redis:7
+    image: redis:7-alpine
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # LocalStack — emulação de AWS SQS para desenvolvimento local (ADR-005)
+  localstack:
+    image: localstack/localstack:3
+    ports:
+      - "4566:4566"
+    environment:
+      SERVICES: sqs
+      DEFAULT_REGION: us-east-1
+      DEBUG: 0
+    volumes:
+      - localstack_data:/var/lib/localstack
+
+  # ---------------------------------------------------------------------------
+  # Microsservicos — descomentados na Sprint 2
+  # ---------------------------------------------------------------------------
 
   # servico-pedidos:
   #   build:
   #     context: ./servico-pedidos
   #     dockerfile: Dockerfile
+  #   ports:
+  #     - "8000:8000"
+  #   environment:
+  #     DATABASE_URL: postgresql://pedidos_user:${PEDIDOS_DB_PASSWORD:-pedidos_pass}@postgres:5432/pedidos_db
+  #     ESTOQUE_GRPC_HOST: servico-estoque
+  #     ESTOQUE_GRPC_PORT: 50051
+  #     JWT_SECRET: ${JWT_SECRET:?Defina JWT_SECRET no .env}
+  #     AWS_ENDPOINT_URL: http://localstack:4566
+  #     SQS_QUEUE_PEDIDOS: caixanamao-pedidos-criados
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
 
   # servico-estoque:
   #   build:
   #     context: ./servico-estoque
   #     dockerfile: Dockerfile
+  #   ports:
+  #     - "50051:50051"
+  #     - "8002:8002"
+  #   environment:
+  #     DATABASE_URL: postgresql://estoque_user:${ESTOQUE_DB_PASSWORD:-estoque_pass}@postgres:5432/estoque_db
+  #     REDIS_URL: redis://redis:6379/0
+  #     AWS_ENDPOINT_URL: http://localstack:4566
+  #     SQS_QUEUE_ESTOQUE: caixanamao-estoque-atualizado
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
 
   # servico-autenticacao:
   #   build:
   #     context: ./servico-autenticacao
   #     dockerfile: Dockerfile
+  #   ports:
+  #     - "8001:8001"
+  #   environment:
+  #     DATABASE_URL: postgresql://auth_user:${AUTH_DB_PASSWORD:-auth_pass}@postgres:5432/autenticacao_db
+  #     JWT_SECRET: ${JWT_SECRET:?Defina JWT_SECRET no .env}
+  #     JWT_ALGORITHM: HS256
+  #     ACCESS_TOKEN_EXPIRE_MINUTES: 15
+  #     REFRESH_TOKEN_EXPIRE_DAYS: 7
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+
+# ---------------------------------------------------------------------------
+# Volumes persistentes
+# ---------------------------------------------------------------------------
+volumes:
+  postgres_data:
+  localstack_data:
