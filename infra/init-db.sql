@@ -4,6 +4,52 @@
 -- =============================================================================
 
 -- -----------------------------------------------------------------------------
+-- 0. Credenciais dos usuários de serviço (lidas do ambiente)
+--
+-- IMPORTANTE: o entrypoint oficial do postgres executa arquivos `.sql` pelo psql
+-- *verbatim* — apenas arquivos `.sh` passam pelo `source` do shell, então NÃO há
+-- expansão de `${VAR}` dentro deste arquivo. Para manter o script em .sql e não
+-- deixar senhas hardcoded, as credenciais são lidas do ambiente pelo próprio
+-- psql com `\getenv` (disponível no PostgreSQL 16), a partir das variáveis
+-- definidas no `docker-compose.yml`:
+--     PEDIDOS_DB_PASSWORD / ESTOQUE_DB_PASSWORD / AUTH_DB_PASSWORD
+--
+-- Se alguma delas não estiver definida, a inicialização falha explicitamente
+-- (fail closed) em vez de criar usuários com senha vazia.
+-- Referência: code review do PR #25 — item bloqueador 1.
+-- -----------------------------------------------------------------------------
+\getenv pedidos_db_password      PEDIDOS_DB_PASSWORD
+\getenv estoque_db_password      ESTOQUE_DB_PASSWORD
+\getenv autenticacao_db_password AUTH_DB_PASSWORD
+
+\if :{?pedidos_db_password}
+\else
+DO $guard$
+BEGIN
+    RAISE EXCEPTION 'PEDIDOS_DB_PASSWORD nao definida — ver docker-compose.yml';
+END
+$guard$;
+\endif
+
+\if :{?estoque_db_password}
+\else
+DO $guard$
+BEGIN
+    RAISE EXCEPTION 'ESTOQUE_DB_PASSWORD nao definida — ver docker-compose.yml';
+END
+$guard$;
+\endif
+
+\if :{?autenticacao_db_password}
+\else
+DO $guard$
+BEGIN
+    RAISE EXCEPTION 'AUTH_DB_PASSWORD nao definida — ver docker-compose.yml';
+END
+$guard$;
+\endif
+
+-- -----------------------------------------------------------------------------
 -- 1. Criar databases lógicos isolados (um por microsserviço)
 -- -----------------------------------------------------------------------------
 CREATE DATABASE pedidos_db;
@@ -11,12 +57,13 @@ CREATE DATABASE estoque_db;
 CREATE DATABASE autenticacao_db;
 
 -- -----------------------------------------------------------------------------
--- 2. Criar usuários com senhas via variáveis de ambiente
---    (os valores são substituídos pelo entrypoint do Docker)
+-- 2. Criar usuários com as senhas vindas do ambiente
+--    (as mesmas variáveis consumidas pelo docker-compose.yml nos DATABASE_URL
+--     dos microsserviços — fonte única de verdade das credenciais)
 -- -----------------------------------------------------------------------------
-CREATE USER pedidos_user WITH PASSWORD 'pedidos_pass';
-CREATE USER estoque_user WITH PASSWORD 'estoque_pass';
-CREATE USER auth_user    WITH PASSWORD 'auth_pass';
+CREATE USER pedidos_user WITH PASSWORD :'pedidos_db_password';
+CREATE USER estoque_user WITH PASSWORD :'estoque_db_password';
+CREATE USER auth_user    WITH PASSWORD :'autenticacao_db_password';
 
 -- -----------------------------------------------------------------------------
 -- 3. Revogar acesso público padrão do PostgreSQL
