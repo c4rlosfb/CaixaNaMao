@@ -4,7 +4,7 @@
 > **Sprint:** 1  
 > **Autor:** c4rlosfb  
 > **Status:** Aprovado pela equipe  
-> **Última atualização:** 2026-09-17
+> **Última atualização:** 2026-09-18
 
 Cada ADR segue o formato: **Contexto → Decisão → Justificativa → Consequências → Alternativas rejeitadas**.
 
@@ -183,7 +183,7 @@ SET lock:estoque:{item_id}  {request_uuid}  NX EX 5
 
 ### Justificativa
 
-| Critério | Redis SETNX | PostgreSQL `SELECT FOR UPDATE` | Mutex em memória |
+| Critério | Redis `SET NX EX` | PostgreSQL `SELECT FOR UPDATE` | Mutex em memória |
 |---|---|---|---|
 | **Distribuído** | ✅ Funciona entre múltiplas instâncias | ✅ Funciona via DB | ❌ Local ao processo |
 | **Performance** | ✅ < 1 ms por operação | ⚠ Adiciona latência de transação | ✅ Nanoseconds |
@@ -206,6 +206,7 @@ dependência adicional.
     return redis.call('DEL', KEYS[1])
   end
   ```
+
 ### Alternativas Rejeitadas
 
 - **`SELECT FOR UPDATE` no PostgreSQL:** Viável, mas mantém a transação aberta durante toda a operação, aumentando o tempo de lock no banco e reduzindo throughput sob alta concorrência.

@@ -4,7 +4,7 @@
 > **Sprint:** 1  
 > **Autor:** c4rlosfb  
 > **Status:** Aprovado  
-> **Última atualização:** 2026-09-17
+> **Última atualização:** 2026-09-18
 
 ---
 
@@ -66,9 +66,10 @@ graph TB
         ADB[(autenticacao_db)]
     end
 
-    A -->|HTTPS REST| GW
-    B -->|HTTPS REST| GW
-    GW -->|Valida JWT| AU
+    A --> |HTTPS REST :8000| GW
+    B --> |HTTPS REST :8000| GW
+    A --> |HTTPS REST :8001\n(auth direto)| AU
+    B --> |HTTPS REST :8001\n(auth direto)| AU
     GW --> PH
     PH -->|gRPC CheckAndReserve| EH
     EH -->|SET NX EX| EL
@@ -103,7 +104,7 @@ graph TB
 POST /auth/register   → cadastra novo vendedor
 POST /auth/login      → autentica e devolve JWT (access + refresh token)
 POST /auth/refresh    → renova access token via refresh token
-POST /auth/validate   → valida token (chamado internamente pelos outros serviços)
+POST /auth/validate   → introspecção/revogação de token (uso futuro — Sprint 4+; validação no caminho crítico é local via HS256)
 ```
 
 **Modelo de dados (`autenticacao_db`):**
@@ -140,7 +141,7 @@ PATCH  /pedidos/{id}/cancelar → cancela pedido (libera estoque)
 
 ```
 1. Recebe requisição REST com JWT do terminal
-2. Valida JWT junto ao servico-autenticacao
+2. Valida JWT **localmente** (HS256 com segredo compartilhado via variável de ambiente) — sem chamada de rede ao servico-autenticacao no caminho crítico
 3. Chama servico-estoque via gRPC: CheckAndReserve(item_id, quantidade)
 4. Se reserva OK → persiste pedido com status CONFIRMADO em pedidos_db
 5. Publica evento PedidoCriado na fila SQS
@@ -166,7 +167,7 @@ itens_pedido (id UUID PK, pedido_id UUID FK, item_id UUID,
 | **Framework** | gRPC (grpcio) + FastAPI para health check |
 | **Porta** | 50051 (gRPC) / 8002 (HTTP health) |
 | **Banco** | `estoque_db` (PostgreSQL) |
-| **Lock** | Redis 7 (SETNX com TTL) |
+| **Lock** | Redis 7 (`SET NX EX` — lock atômico com TTL) |
 | **Responsabilidade** | Gerenciar inventário com garantia de exclusão mútua na reserva |
 
 **Procedimentos gRPC (contrato em `shared-protos/estoque.proto`):**
@@ -182,7 +183,8 @@ service EstoqueService {
 **Fluxo de reserva com exclusão mútua:**
 
 ```
-1. Recebe CheckAndReserve(item_id, quantidade)
+1. Recebe CheckAndReserve(item_id, quantidade, pedido_id, request_uuid)
+   — pedido_id gerado pelo servico-pedidos antes da chamada gRPC (ver contrato em shared-protos/estoque.proto)
 2. Tenta adquirir Redis Lock (atômico): SET lock:estoque:{item_id} {request_uuid} NX EX 5
 3. Se lock não adquirido → retorna ESTOQUE_BLOQUEADO (cliente faz retry)
 4. Dentro do lock:
@@ -274,19 +276,23 @@ Usado exclusivamente como mecanismo de exclusão mútua transiente.
 ```
 Terminal                servico-pedidos           servico-autenticacao
    |                          |                           |
-   |-- POST /auth/login ------+-------------------------> |
-   |<-- { access_token, ... } +--------------------------|
+   |-- POST /auth/login ------------------------------>  |
+   |<------ { access_token, refresh_token } -----------  |
    |                          |                           |
    |-- POST /pedidos (JWT) -> |                           |
-   |                          |-- POST /auth/validate --> |
-   |                          |<-- { valid: true, uid } --|
+   |                          | valida JWT localmente     |
+   |                          | (HS256, sem chamada HTTP) |
    |                          |                           |
    |                    (processa pedido)                 |
 ```
 
 - Tokens JWT com expiração curta (15 min para access, 7 dias para refresh)
-- Algoritmo: HS256 (segredo compartilhado via variável de ambiente)
+- Algoritmo: **HS256** com segredo compartilhado via variável de ambiente `JWT_SECRET`
+- Validação **local** no `servico-pedidos` — sem chamada de rede ao `servico-autenticacao` no caminho crítico (decisão de latência — ver ADR-001)
+- `POST /auth/validate` reservado para introspecção/revogação futura (Sprint 4+)
 - Stateless: nenhum estado de sessão no `servico-pedidos`
+
+> **Nota de infraestrutura:** Não existe API Gateway até a Sprint 4 (#15). Clientes acessam diretamente `:8001` para autenticação e `:8000` para pedidos.
 
 ---
 
