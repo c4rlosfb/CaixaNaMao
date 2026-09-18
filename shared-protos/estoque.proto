@@ -1,0 +1,66 @@
+syntax = "proto3";
+
+package estoque;
+
+option py_generic_services = true;
+
+// =============================================================================
+// Contrato gRPC do servico-estoque
+// Referência: docs/arquitetura.md §3.3 e ADR-001
+// Geração de stubs: python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. estoque.proto
+// =============================================================================
+
+service EstoqueService {
+  // Verifica disponibilidade e reserva atomicamente o estoque
+  rpc CheckAndReserve (ReservaRequest)  returns (ReservaResponse);
+
+  // Libera uma reserva (cancelamento de pedido)
+  rpc ReleaseReserva  (ReleaseRequest)  returns (ReleaseResponse);
+
+  // Consulta dados de um item pelo ID
+  rpc ConsultarItem   (ItemRequest)     returns (ItemResponse);
+}
+
+// -----------------------------------------------------------------------------
+// CheckAndReserve
+// -----------------------------------------------------------------------------
+message ReservaRequest {
+  string item_id     = 1; // UUID do item
+  int32  quantidade  = 2; // Quantidade a reservar
+  string pedido_id   = 3; // UUID do pedido (para registro em movimentacoes)
+  string request_uuid = 4; // UUID único da requisição (idempotência)
+}
+
+message ReservaResponse {
+  bool   sucesso     = 1;
+  string status      = 2; // CONFIRMADO | ESTOQUE_INSUFICIENTE | ESTOQUE_BLOQUEADO
+  string mensagem    = 3;
+}
+
+// -----------------------------------------------------------------------------
+// ReleaseReserva
+// -----------------------------------------------------------------------------
+message ReleaseRequest {
+  string item_id    = 1;
+  int32  quantidade = 2;
+  string pedido_id  = 3;
+}
+
+message ReleaseResponse {
+  bool   sucesso  = 1;
+  string mensagem = 2;
+}
+
+// -----------------------------------------------------------------------------
+// ConsultarItem
+// -----------------------------------------------------------------------------
+message ItemRequest {
+  string item_id = 1;
+}
+
+message ItemResponse {
+  string item_id              = 1;
+  string nome                 = 2;
+  int32  quantidade_disponivel = 3;
+  int32  quantidade_reservada  = 4;
+}

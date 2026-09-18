@@ -1,0 +1,23 @@
+# --- Framework REST ---
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+
+# --- Banco de dados ---
+sqlalchemy==2.0.35
+alembic==1.13.3
+psycopg2-binary==2.9.9
+
+# --- gRPC (cliente para chamar servico-estoque) ---
+grpcio==1.66.1
+grpcio-tools==1.66.1
+
+# --- Mensageria assíncrona (AWS SQS) ---
+boto3==1.35.18
+
+# --- Autenticação JWT (validação local HS256) ---
+pyjwt==2.9.0
+
+# --- Utilitários ---
+python-dotenv==1.0.1
+pydantic-settings==2.5.2
+httpx==0.27.2

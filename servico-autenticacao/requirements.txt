@@ -1,0 +1,17 @@
+# --- Framework REST ---
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+
+# --- Banco de dados ---
+sqlalchemy==2.0.35
+alembic==1.13.3
+psycopg2-binary==2.9.9
+
+# --- Autenticação JWT e segurança ---
+pyjwt==2.9.0
+bcrypt==4.2.0
+python-multipart==0.0.12
+
+# --- Utilitários ---
+python-dotenv==1.0.1
+pydantic-settings==2.5.2
