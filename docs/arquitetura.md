@@ -68,8 +68,8 @@ graph TB
 
     A --> |HTTPS REST :8000| GW
     B --> |HTTPS REST :8000| GW
-    A --> |HTTPS REST :8001\n(auth direto)| AU
-    B --> |HTTPS REST :8001\n(auth direto)| AU
+    A --> |HTTPS REST :8001\nauth direto| AU
+    B --> |HTTPS REST :8001\nauth direto| AU
     GW --> PH
     PH -->|gRPC CheckAndReserve| EH
     EH -->|SET NX EX| EL
