@@ -1,0 +1,35 @@
+# =============================================================================
+# Contexto de build a partir da RAIZ do repositório
+# (usado pelos serviços que precisam de shared-protos/ — ver docker-compose.yml).
+# Serviços com contexto próprio (./servico-*) usam o .dockerignore da sua pasta.
+# =============================================================================
+
+# --- Python: bytecode, caches e artefatos de build ---
+**/__pycache__/
+**/*.py[cod]
+**/*$py.class
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/*.egg-info/
+**/build/
+**/dist/
+
+# --- Ambientes virtuais ---
+**/venv/
+**/.venv/
+
+# --- Segredos e configuração local ---
+**/.env
+**/.env.*
+.env
+.env.*
+
+# --- Metadados de VCS, docs e SO ---
+.git/
+.github/
+docs/
+*.md
+**/*.log
+.DS_Store
+Thumbs.db

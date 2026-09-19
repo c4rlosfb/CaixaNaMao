@@ -69,23 +69,35 @@ services:
   #     redis:
   #       condition: service_healthy
 
-  # servico-estoque:
-  #   build:
-  #     context: ./servico-estoque
-  #     dockerfile: Dockerfile
-  #   ports:
-  #     - "50051:50051"
-  #     - "8002:8002"
-  #   environment:
-  #     DATABASE_URL: postgresql://estoque_user:${ESTOQUE_DB_PASSWORD:-estoque_pass}@postgres:5432/estoque_db
-  #     REDIS_URL: redis://redis:6379/0
-  #     AWS_ENDPOINT_URL: http://localstack:4566
-  #     SQS_QUEUE_ESTOQUE: caixanamao-estoque-atualizado
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #     redis:
-  #       condition: service_healthy
+  servico-estoque:
+    build:
+      # Contexto na raiz porque o build gera os stubs a partir de
+      # shared-protos/estoque.proto (ver servico-estoque/Dockerfile).
+      context: .
+      dockerfile: servico-estoque/Dockerfile
+    ports:
+      - "50051:50051"
+      - "8002:8002"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://estoque_user:${ESTOQUE_DB_PASSWORD:-estoque_pass}@postgres:5432/estoque_db
+      REDIS_URL: redis://redis:6379/0
+      LOCK_TTL_SECONDS: ${LOCK_TTL_SECONDS:-5}
+      AWS_ENDPOINT_URL: http://localstack:4566
+      SQS_QUEUE_ESTOQUE: caixanamao-estoque-atualizado
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8002/health').status == 200 else 1)"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
   # servico-autenticacao:
   #   build:
