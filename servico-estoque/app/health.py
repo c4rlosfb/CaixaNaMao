@@ -2,6 +2,10 @@
 
 `/health`       → liveness (o processo está de pé)
 `/health/ready` → readiness (PostgreSQL e Redis respondem)
+
+O corpo de `/health/ready` reporta apenas quais dependências estão fora —
+o detalhe da exceção (host, nome de banco, mensagem do driver) fica no log,
+para não expor informação operacional a quem alcança o endpoint.
 """
 
 from __future__ import annotations
@@ -9,7 +13,9 @@ from __future__ import annotations
 import logging
 
 from fastapi import FastAPI, Response
+from redis.exceptions import RedisError
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 logger = logging.getLogger(__name__)
@@ -39,15 +45,16 @@ def criar_app_health(
         try:
             async with session_factory() as session:
                 await session.execute(text("SELECT 1"))
-        except Exception as exc:  # noqa: BLE001 - reportado no corpo da resposta
+        except (SQLAlchemyError, OSError) as exc:
+            # Detalhe só no log: o corpo da resposta não expõe host/driver/credenciais.
             logger.warning("Readiness: PostgreSQL indisponível (%s)", exc)
-            problemas["database"] = str(exc)
+            problemas["database"] = "indisponivel"
 
         try:
             await redis_client.ping()
-        except Exception as exc:  # noqa: BLE001 - reportado no corpo da resposta
+        except (RedisError, OSError) as exc:
             logger.warning("Readiness: Redis indisponível (%s)", exc)
-            problemas["redis"] = str(exc)
+            problemas["redis"] = "indisponivel"
 
         if problemas:
             response.status_code = 503

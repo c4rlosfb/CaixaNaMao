@@ -35,9 +35,10 @@ class StatusReserva(str, Enum):
     """Resultado de uma reserva.
 
     `CONFIRMADO`, `ESTOQUE_INSUFICIENTE` e `ESTOQUE_BLOQUEADO` são exatamente os
-    valores do contrato gRPC. `ITEM_NAO_ENCONTRADO` e `CONFLITO_IDEMPOTENCIA`
-    são internos: o contrato não tem campo para expressá-los, então o servicer
-    os traduz para os status gRPC `NOT_FOUND` e `FAILED_PRECONDITION`.
+    valores do contrato gRPC. `ITEM_NAO_ENCONTRADO`, `CONFLITO_IDEMPOTENCIA` e
+    `QUANTIDADE_INVALIDA` são internos: o contrato não tem campo para expressá-los,
+    então o servicer os traduz para os status gRPC `NOT_FOUND`,
+    `FAILED_PRECONDITION` e `INVALID_ARGUMENT`.
     """
 
     CONFIRMADO = "CONFIRMADO"
@@ -45,6 +46,7 @@ class StatusReserva(str, Enum):
     ESTOQUE_BLOQUEADO = "ESTOQUE_BLOQUEADO"
     ITEM_NAO_ENCONTRADO = "ITEM_NAO_ENCONTRADO"
     CONFLITO_IDEMPOTENCIA = "CONFLITO_IDEMPOTENCIA"
+    QUANTIDADE_INVALIDA = "QUANTIDADE_INVALIDA"
 
 
 class StatusLiberacao(str, Enum):
@@ -56,6 +58,18 @@ class StatusLiberacao(str, Enum):
     PARAMETROS_DIVERGENTES = "PARAMETROS_DIVERGENTES"
     ESTOQUE_BLOQUEADO = "ESTOQUE_BLOQUEADO"
     INCONSISTENCIA = "INCONSISTENCIA"
+    QUANTIDADE_INVALIDA = "QUANTIDADE_INVALIDA"
+
+
+def quantidade_valida(quantidade: object) -> bool:
+    """Quantidade precisa ser inteiro maior que zero.
+
+    Validação na camada de domínio (e não só no servicer): uma quantidade
+    negativa passaria pelo `UPDATE ... WHERE quantidade_disponivel >= :q` e
+    *aumentaria* o saldo — corrompendo o estoque. Vale para qualquer chamador
+    futuro, não apenas para o caminho gRPC.
+    """
+    return isinstance(quantidade, int) and not isinstance(quantidade, bool) and quantidade > 0
 
 
 @dataclass(frozen=True)
@@ -124,6 +138,14 @@ class EstoqueService:
         pedido_id: uuid.UUID,
         request_uuid: uuid.UUID,
     ) -> ResultadoReserva:
+        # 0. Entrada inválida nunca chega ao banco (quantidade negativa aumentaria o saldo).
+        if not quantidade_valida(quantidade):
+            logger.warning("Reserva recusada: quantidade inválida (%r)", quantidade)
+            return ResultadoReserva(
+                StatusReserva.QUANTIDADE_INVALIDA,
+                f"quantidade deve ser um inteiro maior que zero (recebido: {quantidade!r})",
+            )
+
         # 1. Idempotência: retry do mesmo pedido não reserva duas vezes.
         reserva_existente = await self._repo.buscar_movimentacao(pedido_id, TipoMovimentacao.RESERVA)
         if reserva_existente is not None:
@@ -213,6 +235,13 @@ class EstoqueService:
         pedido_id: uuid.UUID,
         request_uuid: uuid.UUID,
     ) -> ResultadoLiberacao:
+        if not quantidade_valida(quantidade):
+            logger.warning("Liberação recusada: quantidade inválida (%r)", quantidade)
+            return ResultadoLiberacao(
+                StatusLiberacao.QUANTIDADE_INVALIDA,
+                f"quantidade deve ser um inteiro maior que zero (recebido: {quantidade!r})",
+            )
+
         if await self._repo.buscar_movimentacao(pedido_id, TipoMovimentacao.LIBERACAO) is not None:
             logger.info("Liberação idempotente (pedido %s já liberado)", pedido_id)
             return ResultadoLiberacao(

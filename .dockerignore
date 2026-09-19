@@ -8,6 +8,12 @@
 **/__pycache__/
 **/*.py[cod]
 **/*$py.class
+
+# --- Stubs gRPC gerados (o build regenera a partir de shared-protos/estoque.proto;
+#     nunca copiar stubs locais, que podem estar desatualizados) ---
+**/estoque_pb2.py
+**/estoque_pb2_grpc.py
+**/*_pb2.pyi
 **/.pytest_cache/
 **/.mypy_cache/
 **/.ruff_cache/

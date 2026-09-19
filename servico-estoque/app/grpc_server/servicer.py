@@ -30,6 +30,7 @@ from app.services.estoque_service import (
     EstoqueService,
     ResultadoLiberacao,
     ResultadoReserva,
+    StatusLiberacao,
     StatusReserva,
 )
 
@@ -88,6 +89,8 @@ def criar_servicer(
                 await context.abort(grpc.StatusCode.NOT_FOUND, resultado.mensagem)
             if resultado.status is StatusReserva.CONFLITO_IDEMPOTENCIA:
                 await context.abort(grpc.StatusCode.FAILED_PRECONDITION, resultado.mensagem)
+            if resultado.status is StatusReserva.QUANTIDADE_INVALIDA:
+                await context.abort(grpc.StatusCode.INVALID_ARGUMENT, resultado.mensagem)
 
             return estoque_pb2.ReservaResponse(
                 sucesso=resultado.sucesso,
@@ -111,6 +114,9 @@ def criar_servicer(
                     pedido_id=pedido_id,
                     request_uuid=uuid.uuid4(),
                 )
+
+            if resultado.status is StatusLiberacao.QUANTIDADE_INVALIDA:
+                await context.abort(grpc.StatusCode.INVALID_ARGUMENT, resultado.mensagem)
 
             return estoque_pb2.ReleaseResponse(
                 sucesso=resultado.sucesso, mensagem=resultado.mensagem

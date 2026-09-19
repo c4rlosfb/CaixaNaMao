@@ -46,3 +46,13 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def alvo_banco_sanitizado(database_url: str) -> str:
+    """Devolve `host:porta/database` da URL, sem credenciais e sem querystring.
+
+    Usado apenas em log: a URL completa carrega a senha e pode carregar opções
+    sensíveis (ex.: parâmetros de TLS), que não devem ir para o log.
+    """
+    sem_query = database_url.split("?", 1)[0]
+    return sem_query.rsplit("@", 1)[-1]

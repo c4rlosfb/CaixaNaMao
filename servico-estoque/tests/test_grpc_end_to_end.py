@@ -114,6 +114,20 @@ async def test_pedido_id_invalido_retorna_invalid_argument(stub):
     assert erro.value.code() is grpc.StatusCode.INVALID_ARGUMENT
 
 
+async def test_quantidade_negativa_retorna_invalid_argument(stub):
+    """Quantidade negativa nunca chega ao banco (aumentaria o saldo)."""
+    with pytest.raises(grpc.aio.AioRpcError) as erro:
+        await stub.CheckAndReserve(
+            estoque_pb2.ReservaRequest(
+                item_id=str(uuid.uuid4()),
+                quantidade=-3,
+                pedido_id=str(uuid.uuid4()),
+                request_uuid=str(uuid.uuid4()),
+            )
+        )
+    assert erro.value.code() is grpc.StatusCode.INVALID_ARGUMENT
+
+
 async def test_consultar_item_pelo_contrato(stub, item_factory):
     item = await item_factory(quantidade=9, nome="Água")
 

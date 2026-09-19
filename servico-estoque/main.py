@@ -21,7 +21,7 @@ import uvicorn
 from redis.asyncio import Redis
 
 from app.clients.event_publisher import criar_event_publisher
-from app.config import settings
+from app.config import alvo_banco_sanitizado, settings
 from app.db import SessionFactory
 from app.grpc_server.server import montar_servidor_grpc
 from app.health import criar_app_health
@@ -50,7 +50,7 @@ async def _executar() -> None:
         "Iniciando servico-estoque — gRPC :%s | health :%s | db=%s",
         settings.grpc_port,
         settings.health_port,
-        settings.database_url.split("@")[-1],
+        alvo_banco_sanitizado(settings.database_url),
     )
 
     redis = Redis.from_url(settings.redis_url, encoding="utf-8", decode_responses=True)

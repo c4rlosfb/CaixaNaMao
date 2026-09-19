@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 
+import pytest
 from sqlalchemy import func, select
 
 from app.locking.redis_lock import RedisLockManager
@@ -301,3 +302,49 @@ async def test_consulta_item(session, lock_manager, item_factory):
     assert encontrado.quantidade_disponivel == 7
     assert encontrado.quantidade_reservada == 0
     assert inexistente is None
+
+
+# ---------------------------------------------------------------------------
+# Validação de entrada no domínio (quantidade precisa ser inteiro > 0)
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("quantidade", [0, -1, -5])
+async def test_reserva_com_quantidade_invalida_nao_altera_saldo(
+    session, lock_manager, item_factory, redis_fake, quantidade
+):
+    """Quantidade 0/negativa não pode chegar ao UPDATE (a negativa aumentaria o saldo)."""
+    item = await item_factory(quantidade=10)
+    servico = EstoqueService(session, lock_manager)
+
+    resultado = await servico.reservar(
+        item_id=item.id, quantidade=quantidade, pedido_id=uuid.uuid4(), request_uuid=uuid.uuid4()
+    )
+
+    assert resultado.status is StatusReserva.QUANTIDADE_INVALIDA
+    assert resultado.sucesso is False
+    await session.refresh(item)
+    assert item.quantidade_disponivel == 10
+    assert item.quantidade_reservada == 0
+    # A validação acontece antes de qualquer efeito: nem lock é adquirido.
+    assert await redis_fake.keys("lock:*") == []
+
+
+@pytest.mark.parametrize("quantidade", [0, -3])
+async def test_liberacao_com_quantidade_invalida_nao_altera_saldo(
+    session, lock_manager, item_factory, quantidade
+):
+    item = await item_factory(quantidade=10)
+    pedido_id = uuid.uuid4()
+    servico = EstoqueService(session, lock_manager)
+    await servico.reservar(
+        item_id=item.id, quantidade=2, pedido_id=pedido_id, request_uuid=uuid.uuid4()
+    )
+
+    resultado = await servico.liberar(
+        item_id=item.id, quantidade=quantidade, pedido_id=pedido_id, request_uuid=uuid.uuid4()
+    )
+
+    assert resultado.status is StatusLiberacao.QUANTIDADE_INVALIDA
+    assert resultado.sucesso is False
+    await session.refresh(item)
+    assert item.quantidade_disponivel == 8
+    assert item.quantidade_reservada == 2
