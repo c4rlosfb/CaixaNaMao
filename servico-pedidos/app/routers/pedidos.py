@@ -5,14 +5,13 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.jwt import TokenPayload
 from app.clients.estoque_client import EstoqueClient, get_estoque_client
 from app.clients.sqs_client import SQSClient, get_sqs_client
 from app.dependencies import get_current_user, get_db
-from app.repositories.pedido_repository import PedidoRepository
 from app.schemas.pedido import PedidoCreate, PedidoListResponse, PedidoResponse
 from app.services.pedido_service import PedidoService
 
@@ -73,14 +72,11 @@ async def criar_pedido(
 async def get_pedido(
     pedido_id: uuid.UUID,
     current_user: UsuarioDep,
-    db: SessaoDep,
+    service: ServicoDep,
 ) -> PedidoResponse:
-    repo = PedidoRepository(db)
-    pedido = await repo.get_by_id(pedido_id)
-    if pedido is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pedido não encontrado")
-    if pedido.vendedor_id != current_user.vendedor_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Sem permissão")
+    pedido = await service.buscar_pedido(
+        pedido_id=pedido_id, vendedor_id=current_user.vendedor_id
+    )
     return PedidoResponse.model_validate(pedido)
 
 
@@ -91,15 +87,12 @@ async def get_pedido(
 )
 async def listar_pedidos(
     current_user: UsuarioDep,
-    db: SessaoDep,
+    service: ServicoDep,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> PedidoListResponse:
-    repo = PedidoRepository(db)
-    total, pedidos = await repo.list_by_vendedor(
-        vendedor_id=current_user.vendedor_id,
-        limit=limit,
-        offset=offset,
+    total, pedidos = await service.listar_pedidos(
+        vendedor_id=current_user.vendedor_id, limit=limit, offset=offset
     )
     return PedidoListResponse(
         total=total,

@@ -219,3 +219,52 @@ async def test_health(client: AsyncClient) -> None:
     response = await client.get("/health")
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
+
+
+# ---------------------------------------------------------------------------
+# Limites de entrada (review: validação precisa barrar antes do banco)
+# ---------------------------------------------------------------------------
+async def test_criar_pedido_preco_acima_do_numeric_12_2(client: AsyncClient) -> None:
+    """Preço que não cabe em NUMERIC(12,2) precisa ser 422, não 500 do banco."""
+    payload = {
+        "itens": [
+            {"item_id": str(uuid.uuid4()), "quantidade": 1, "preco_unitario": "999999999999999999.99"}
+        ]
+    }
+
+    response = await client.post(
+        "/pedidos", json=payload, headers={"Authorization": f"Bearer {VALID_TOKEN}"}
+    )
+
+    assert response.status_code == 422
+
+
+async def test_criar_pedido_com_mais_de_100_itens(client: AsyncClient) -> None:
+    payload = {
+        "itens": [
+            {"item_id": str(uuid.uuid4()), "quantidade": 1, "preco_unitario": "1.00"}
+            for _ in range(101)
+        ]
+    }
+
+    response = await client.post(
+        "/pedidos", json=payload, headers={"Authorization": f"Bearer {VALID_TOKEN}"}
+    )
+
+    assert response.status_code == 422
+
+
+async def test_criar_pedido_total_acima_do_limite_da_coluna(client: AsyncClient) -> None:
+    """Soma válida por item, mas que estoura NUMERIC(12,2) no total."""
+    payload = {
+        "itens": [
+            {"item_id": str(uuid.uuid4()), "quantidade": 2, "preco_unitario": "9999999999.99"}
+        ]
+    }
+
+    response = await client.post(
+        "/pedidos", json=payload, headers={"Authorization": f"Bearer {VALID_TOKEN}"}
+    )
+
+    assert response.status_code == 422
+    assert "NUMERIC(12,2)" in response.json()["detail"]

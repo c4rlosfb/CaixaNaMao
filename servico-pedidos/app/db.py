@@ -15,13 +15,22 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.config import settings
 
-engine = create_async_engine(
-    settings.database_url,
-    echo=False,
-    pool_pre_ping=True,
-    pool_size=settings.db_pool_size,
-    max_overflow=settings.db_max_overflow,
-)
+
+def criar_engine(url: str):
+    """Cria a engine com o que o dialeto aceita.
+
+    `pool_size`/`max_overflow` existem apenas em dialetos com pool real (PostgreSQL,
+    MySQL...). SQLite — usado pelo harness de testes — usa `StaticPool` e rejeita esses
+    parâmetros com `TypeError`, então eles só são passados quando fazem sentido.
+    """
+    opcoes: dict = {"echo": False, "pool_pre_ping": True}
+    if not url.startswith("sqlite"):
+        opcoes["pool_size"] = settings.db_pool_size
+        opcoes["max_overflow"] = settings.db_max_overflow
+    return create_async_engine(url, **opcoes)
+
+
+engine = criar_engine(settings.database_url)
 
 AsyncSessionFactory = async_sessionmaker(engine, expire_on_commit=False)
 

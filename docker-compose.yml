@@ -72,6 +72,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      # O bloco do servico-estoque é habilitado pela PR #27 (Sprint 2 / Issue #6):
+      # enquanto ela não estiver em `dev`, este compose referencia um serviço que
+      # ainda não existe (o Docker Compose recusa o projeto inteiro). **Ordem de
+      # merge: #27 antes de #26** — ou as duas juntas.
       servico-estoque:
         condition: service_healthy
     healthcheck:

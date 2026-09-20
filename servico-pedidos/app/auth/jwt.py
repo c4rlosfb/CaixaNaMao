@@ -37,15 +37,15 @@ def decode_token(token: str) -> TokenPayload:
         if not sub:
             raise ValueError("Campo 'sub' ausente no token")
         return TokenPayload(sub=sub, **{k: v for k, v in payload.items() if k != "sub"})
-    except jwt.ExpiredSignatureError:
+    except jwt.ExpiredSignatureError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token expirado",
             headers={"WWW-Authenticate": "Bearer"},
-        )
+        ) from exc
     except (jwt.InvalidTokenError, ValueError) as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Token inválido: {exc}",
             headers={"WWW-Authenticate": "Bearer"},
-        )
+        ) from exc

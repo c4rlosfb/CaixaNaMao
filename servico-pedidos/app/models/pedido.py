@@ -21,8 +21,8 @@ class Pedido(Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     vendedor_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
-    status: Mapped[str] = mapped_column(
-        String(20), nullable=False, default=StatusPedido.PENDENTE
+    status: Mapped[StatusPedido] = mapped_column(
+        String(20), nullable=False, default=StatusPedido.CONFIRMADO
     )
     total: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     # `DateTime(timezone=True)` é obrigatório para casar com o `TIMESTAMP WITH TIME

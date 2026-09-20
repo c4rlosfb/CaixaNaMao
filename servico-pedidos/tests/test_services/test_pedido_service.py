@@ -7,6 +7,7 @@ de estoque — bloqueadores do review do PR #26.
 
 from __future__ import annotations
 
+import logging
 import time
 import uuid
 from decimal import Decimal
@@ -17,7 +18,12 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.clients.estoque_client import EstoqueClient, ReservaResult, StatusReserva
+from app.clients.estoque_client import (
+    EstoqueClient,
+    ReleaseResult,
+    ReservaResult,
+    StatusReserva,
+)
 from app.clients.sqs_client import SQSClient
 from app.models.enums import StatusPedido
 from app.models.pedido import Pedido
@@ -297,3 +303,130 @@ async def test_cancelar_pedido_inexistente_lanca_404(service):
         await service.cancelar_pedido(pedido_id=uuid.uuid4(), vendedor_id=uuid.uuid4())
 
     assert exc_info.value.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Total acima do limite da coluna (review: max_digits sem limite de parte inteira)
+# ---------------------------------------------------------------------------
+async def test_total_acima_do_numeric_12_2_retorna_422(service, mock_estoque_ok):
+    """O total precisa ser validado antes de chegar ao banco (senão vira 500)."""
+    payload = _dto((uuid.uuid4(), 2, "9999999999.99"))
+
+    with pytest.raises(HTTPException) as exc_info:
+        await service.criar_pedido(vendedor_id=uuid.uuid4(), payload=payload)
+
+    assert exc_info.value.status_code == 422
+    assert "NUMERIC(12,2)" in exc_info.value.detail
+    # Validação é antes de qualquer efeito: nada reservado, nada publicado.
+    mock_estoque_ok.check_and_reserve.assert_not_awaited()
+
+
+async def test_total_no_limite_exato_e_aceito(service, db_session, mock_estoque_ok, mock_sqs):
+    payload = _dto((uuid.uuid4(), 1, "9999999999.99"))
+
+    pedido = await service.criar_pedido(vendedor_id=uuid.uuid4(), payload=payload)
+
+    assert pedido.total == Decimal("9999999999.99")
+
+
+# ---------------------------------------------------------------------------
+# Leitura: regras de acesso no serviço (review: router pulava a camada de serviço)
+# ---------------------------------------------------------------------------
+async def test_buscar_pedido_do_vendedor(service, db_session):
+    vendedor_id = uuid.uuid4()
+    pedido = await _criar_pedido_persistido(db_session, vendedor_id, uuid.uuid4())
+
+    encontrado = await service.buscar_pedido(pedido_id=pedido.id, vendedor_id=vendedor_id)
+
+    assert encontrado.id == pedido.id
+
+
+async def test_buscar_pedido_de_outro_vendedor_lanca_403(service, db_session):
+    pedido = await _criar_pedido_persistido(db_session, uuid.uuid4(), uuid.uuid4())
+
+    with pytest.raises(HTTPException) as exc_info:
+        await service.buscar_pedido(pedido_id=pedido.id, vendedor_id=uuid.uuid4())
+
+    assert exc_info.value.status_code == 403
+
+
+async def test_buscar_pedido_inexistente_lanca_404(service):
+    with pytest.raises(HTTPException) as exc_info:
+        await service.buscar_pedido(pedido_id=uuid.uuid4(), vendedor_id=uuid.uuid4())
+
+    assert exc_info.value.status_code == 404
+
+
+async def test_listar_pedidos_filtra_pelo_vendedor(service, db_session):
+    vendedor_a = uuid.uuid4()
+    await _criar_pedido_persistido(db_session, vendedor_a, uuid.uuid4())
+    await _criar_pedido_persistido(db_session, uuid.uuid4(), uuid.uuid4())
+
+    total, pedidos = await service.listar_pedidos(vendedor_id=vendedor_a)
+
+    assert total == 1
+    assert [p.vendedor_id for p in pedidos] == [vendedor_a]
+
+
+# ---------------------------------------------------------------------------
+# Compensação com visibilidade (review: retorno do release era ignorado)
+# ---------------------------------------------------------------------------
+async def test_compensacao_loga_recusa_do_estoque_e_tenta_os_demais(
+    service, mock_estoque_ok, mock_sqs, caplog
+):
+    """Uma recusa do estoque não pode passar em silêncio nem abortar as outras."""
+    item_1, item_2 = uuid.uuid4(), uuid.uuid4()
+    mock_estoque_ok.check_and_reserve = AsyncMock(
+        side_effect=[
+            ReservaResult(sucesso=True, status=StatusReserva.CONFIRMADO, mensagem="OK"),
+            ReservaResult(
+                sucesso=False, status=StatusReserva.ESTOQUE_BLOQUEADO, mensagem="Bloqueado"
+            ),
+        ]
+    )
+    mock_estoque_ok.release_reserva = AsyncMock(
+        side_effect=[
+            ReleaseResult(sucesso=False, mensagem="RESERVA_NAO_ENCONTRADA"),
+            ReleaseResult(sucesso=True, mensagem="Liberado"),
+        ]
+    )
+
+    with caplog.at_level(logging.ERROR), pytest.raises(HTTPException):
+        await service.criar_pedido(
+            vendedor_id=uuid.uuid4(), payload=_dto((item_1, 1, "1.00"), (item_2, 1, "1.00"))
+        )
+
+    # Só o item 1 chegou a ser reservado, então só ele é liberado — e o estoque
+    # recusa a liberação (RESERVA_NAO_ENCONTRADA), o que precisa aparecer no log.
+    assert mock_estoque_ok.release_reserva.await_count == 1
+    assert any(
+        "reserva órfã" in registro.message or "Compensação recusada" in registro.message
+        for registro in caplog.records
+    ), "a recusa do estoque precisa aparecer no log"
+
+
+async def test_compensacao_isola_excecao_de_um_item(service, mock_estoque_ok, mock_sqs):
+    """Exceção na liberação de um item não pode impedir a dos demais."""
+    itens = [uuid.uuid4(), uuid.uuid4(), uuid.uuid4()]
+    mock_estoque_ok.check_and_reserve = AsyncMock(
+        side_effect=[
+            ReservaResult(sucesso=True, status=StatusReserva.CONFIRMADO, mensagem="OK"),
+            ReservaResult(sucesso=True, status=StatusReserva.CONFIRMADO, mensagem="OK"),
+            ReservaResult(
+                sucesso=False, status=StatusReserva.ESTOQUE_INSUFICIENTE, mensagem="Sem estoque"
+            ),
+        ]
+    )
+    mock_estoque_ok.release_reserva = AsyncMock(
+        side_effect=[RuntimeError("canal morto"), ReleaseResult(sucesso=True, mensagem="OK")]
+    )
+
+    with pytest.raises(HTTPException):
+        await service.criar_pedido(
+            vendedor_id=uuid.uuid4(),
+            payload=_dto(*[(item_id, 1, "1.00") for item_id in itens]),
+        )
+
+    assert mock_estoque_ok.release_reserva.await_count == 2, (
+        "os dois itens reservados precisam ser compensados, mesmo com erro no primeiro"
+    )

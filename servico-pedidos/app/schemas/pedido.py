@@ -13,7 +13,15 @@ from app.models.enums import StatusPedido
 class ItemPedidoCreate(BaseModel):
     item_id: uuid.UUID
     quantidade: int = Field(gt=0, description="Quantidade deve ser maior que zero")
-    preco_unitario: Decimal = Field(gt=0, decimal_places=2)
+    # `max_digits` é obrigatório junto de `decimal_places`: sem ele um valor como
+    # 999999999999999999.99 passa na validação e só estoura no banco (NUMERIC(12,2)),
+    # virando erro 500 em vez de 422.
+    preco_unitario: Decimal = Field(
+        gt=0,
+        max_digits=12,
+        decimal_places=2,
+        description="Preço unitário com 2 casas decimais (NUMERIC(12,2) no banco)",
+    )
 
 
 class ItemPedidoResponse(BaseModel):
@@ -30,7 +38,11 @@ class ItemPedidoResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 class PedidoCreate(BaseModel):
-    itens: list[ItemPedidoCreate] = Field(min_length=1, description="Pelo menos um item é obrigatório")
+    itens: list[ItemPedidoCreate] = Field(
+        min_length=1,
+        max_length=100,
+        description="Pelo menos um item e no máximo 100 (limite de itens por pedido)",
+    )
 
     @field_validator("itens")
     @classmethod

@@ -37,6 +37,21 @@ logger = logging.getLogger(__name__)
 
 _NAMESPACE_PEDIDO = "caixanamao/pedidos"
 
+# Limite do NUMERIC(12,2): validado aqui para não virar erro 500 no banco.
+TOTAL_MAXIMO = Decimal("9999999999.99")
+
+
+def _validar_total(total: Decimal) -> None:
+    """Recusa (422) um total que não cabe no NUMERIC(12,2) da coluna `pedidos.total`."""
+    if total > TOTAL_MAXIMO:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "Total do pedido excede o limite suportado pela coluna NUMERIC(12,2): "
+                f"{total}"
+            ),
+        )
+
 # Publicações de eventos em voo (best-effort). Ficam registradas para não serem
 # coletadas pelo GC no meio do envio e para poderem ser aguardadas por
 # `aguardar_publicacoes()` (testes e shutdown gracioso).
@@ -122,6 +137,7 @@ class PedidoService:
             (Decimal(str(item.preco_unitario)) * item.quantidade for item in payload.itens),
             Decimal(0),
         )
+        _validar_total(total)
 
         # 1. Reserva todos os itens — se qualquer um falhar, compensa os anteriores.
         reservas_feitas: list[tuple[uuid.UUID, int, uuid.UUID]] = []
@@ -204,6 +220,29 @@ class PedidoService:
         logger.info("Pedido criado com sucesso: id=%s vendedor=%s", pedido.id, vendedor_id)
         return pedido
 
+    async def buscar_pedido(self, pedido_id: uuid.UUID, vendedor_id: uuid.UUID) -> Pedido:
+        """Pedido do vendedor autenticado (404 se não existe, 403 se é de outro).
+
+        As regras de acesso ficam no serviço, não no router: o contrato da camada
+        diz que "toda a lógica de negócio fica aqui".
+        """
+        pedido = await self._repo.get_by_id(pedido_id)
+        if pedido is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Pedido não encontrado"
+            )
+        if pedido.vendedor_id != vendedor_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Sem permissão")
+        return pedido
+
+    async def listar_pedidos(
+        self, vendedor_id: uuid.UUID, limit: int = 20, offset: int = 0
+    ) -> tuple[int, list[Pedido]]:
+        """Lista paginada dos pedidos do vendedor autenticado (o filtro vem do JWT)."""
+        return await self._repo.list_by_vendedor(
+            vendedor_id=vendedor_id, limit=limit, offset=offset
+        )
+
     async def cancelar_pedido(
         self,
         pedido_id: uuid.UUID,
@@ -244,11 +283,35 @@ class PedidoService:
     async def _release_all(
         self, reservas: list[tuple[uuid.UUID, int, uuid.UUID]]
     ) -> None:
-        """Compensação: libera todas as reservas já feitas para um pedido que falhou."""
+        """Compensação: libera todas as reservas já feitas para um pedido que falhou.
+
+        Best-effort **com visibilidade**: cada liberação é isolada (a falha de uma não
+        impede as demais) e uma recusa do estoque vira log de ERROR com o item afetado.
+        Estoque reservado para um pedido que não existe é o pior estado possível —
+        precisa ser rastreável, não silencioso.
+        """
         for item_id, quantidade, pedido_id in reservas:
-            await self._estoque.release_reserva(
-                item_id=item_id, quantidade=quantidade, pedido_id=pedido_id
-            )
+            try:
+                resultado = await self._estoque.release_reserva(
+                    item_id=item_id, quantidade=quantidade, pedido_id=pedido_id
+                )
+            except Exception:
+                logger.exception(
+                    "Falha ao compensar a reserva (pedido=%s, item=%s) — "
+                    "o estoque pode continuar reservado",
+                    pedido_id,
+                    item_id,
+                )
+                continue
+
+            if not resultado.sucesso:
+                logger.error(
+                    "Compensação recusada pelo servico-estoque (pedido=%s, item=%s): %s — "
+                    "reserva órfã a verificar",
+                    pedido_id,
+                    item_id,
+                    resultado.mensagem,
+                )
 
 
 def _raise_for_reserva_status(reserva_status: StatusReserva, item_id: uuid.UUID) -> None:
