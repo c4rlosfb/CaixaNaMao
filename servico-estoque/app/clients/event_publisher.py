@@ -36,7 +36,17 @@ class NullEventPublisher:
 
 
 class SQSEventPublisher:
-    """Publica no SQS via boto3 (chamada síncrona executada em thread)."""
+    """Publica no SQS via boto3, fora do caminho crítico da requisição.
+
+    O envio é síncrono (boto3) e roda numa thread; a diferença essencial é que o
+    handler **não espera** o broker: a publicação é agendada e a resposta do
+    comando sai imediatamente. Com um endpoint SQS indisponível, aguardar o envio
+    adicionava ~7s a cada reserva — estourando o deadline dos clientes gRPC.
+
+    As tarefas em voo ficam registradas em `_tarefas` para (a) não serem coletadas
+    pelo GC no meio do envio e (b) poderem ser aguardadas em testes/shutdown com
+    `aguardar_publicacoes()`.
+    """
 
     def __init__(
         self,
@@ -54,10 +64,12 @@ class SQSEventPublisher:
         self._aws_secret_access_key = aws_secret_access_key
         self._cliente = None
         self._url_fila: str | None = None  # cache: evita get_queue_url a cada evento
+        self._tarefas: set[asyncio.Task[None]] = set()
 
     def _obter_cliente(self):  # pragma: no cover - exige AWS/LocalStack
         if self._cliente is None:
             import boto3
+            from botocore.config import Config
 
             self._cliente = boto3.client(
                 "sqs",
@@ -65,6 +77,13 @@ class SQSEventPublisher:
                 region_name=self._region_name,
                 aws_access_key_id=self._aws_access_key_id,
                 aws_secret_access_key=self._aws_secret_access_key,
+                # Best-effort não pode virar espera longa: falha rápido e não fica
+                # retentando em background com conexão pendurada.
+                config=Config(
+                    connect_timeout=2.0,
+                    read_timeout=2.0,
+                    retries={"max_attempts": 1, "mode": "standard"},
+                ),
             )
         return self._cliente
 
@@ -86,10 +105,13 @@ class SQSEventPublisher:
             self._url_fila = None
             raise
 
-    async def publicar_estoque_atualizado(self, *, evento: dict[str, object]) -> None:
+    def _enviar_e_logar(self, evento: dict[str, object]) -> None:
+        """Envio síncrono (executado na thread) com log — nunca propaga exceção."""
         try:
-            await asyncio.to_thread(self._enviar_bloqueante, evento)
-            logger.info("Evento EstoqueAtualizado publicado (event_id=%s)", evento.get("event_id"))
+            self._enviar_bloqueante(evento)
+            logger.info(
+                "Evento EstoqueAtualizado publicado (event_id=%s)", evento.get("event_id")
+            )
         except Exception as exc:  # noqa: BLE001 - best-effort: nunca propaga
             logger.warning(
                 "Falha ao publicar EstoqueAtualizado (event_id=%s) na fila %s: %s",
@@ -97,6 +119,21 @@ class SQSEventPublisher:
                 self._queue_name,
                 exc,
             )
+
+    async def publicar_estoque_atualizado(self, *, evento: dict[str, object]) -> None:
+        """Agenda a publicação e retorna **imediatamente** (best-effort).
+
+        Não aguardar o broker é o que mantém a latência do comando desacoplada da
+        disponibilidade do SQS.
+        """
+        tarefa = asyncio.create_task(asyncio.to_thread(self._enviar_e_logar, evento))
+        self._tarefas.add(tarefa)
+        tarefa.add_done_callback(self._tarefas.discard)
+
+    async def aguardar_publicacoes(self) -> None:
+        """Aguarda as publicações em voo (shutdown e testes)."""
+        while self._tarefas:
+            await asyncio.gather(*list(self._tarefas), return_exceptions=True)
 
 
 def criar_event_publisher(
