@@ -9,6 +9,9 @@
 [tool.ruff]
 line-length = 110
 target-version = "py312"
+# Stubs gerados pelo protoc em build time (gitignored): não são código-fonte e
+# não devem ser lintados (o ruff 0.16 não os exclui pelo .gitignore).
+extend-exclude = ["**/estoque_pb2.py", "**/estoque_pb2_grpc.py"]
 
 [tool.ruff.lint.isort]
 # Sem isto o ruff trata `app`/`tests` como third-party e ordena fora do padrão do projeto.

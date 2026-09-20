@@ -134,6 +134,10 @@ class SQSEventPublisher:
         """Aguarda as publicações em voo (shutdown e testes)."""
         while self._tarefas:
             await asyncio.gather(*list(self._tarefas), return_exceptions=True)
+            # `gather` sobre tarefas já concluídas retorna sem ceder o controle: sem
+            # este `sleep(0)` o laço giraria em busy loop antes de o callback de
+            # conclusão (que limpa o conjunto) rodar.
+            await asyncio.sleep(0)
 
 
 def criar_event_publisher(
