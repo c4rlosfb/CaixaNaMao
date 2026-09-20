@@ -1,0 +1,14 @@
+# Dependências da suíte de integração (tests/integracao)
+#
+#   pip install -r tests/integracao/requirements.txt
+#
+# São as mesmas versões usadas pelos serviços, para a suíte falar com eles
+# exatamente como um cliente de verdade faria.
+
+httpx==0.27.2         # cliente REST do servico-pedidos
+grpcio==1.66.1        # cliente gRPC do servico-estoque
+grpcio-tools==1.66.1  # compila shared-protos/estoque.proto em tempo de teste
+protobuf==5.29.6      # mensagens geradas + descritor (guarda de contrato)
+pyjwt==2.9.0          # assina o JWT do vendedor (HS256 — ADR-001)
+asyncpg==0.29.0       # semeia/observa itens no PostgreSQL do estoque
+pytest==8.3.3         # runner
