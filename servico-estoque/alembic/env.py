@@ -3,6 +3,7 @@
 import asyncio
 from logging.config import fileConfig
 
+from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
@@ -10,7 +11,6 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 # Importa todos os modelos para que o autogenerate funcione
 import app.models.item
 import app.models.movimentacao  # noqa: F401
-from alembic import context
 from app.config import settings
 from app.models.base import Base
 

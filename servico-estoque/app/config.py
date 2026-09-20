@@ -28,7 +28,11 @@ class Settings(BaseSettings):
     # --- Servidor gRPC ---
     grpc_host: str = "0.0.0.0"
     grpc_port: int = 50051
-    grpc_max_workers: int = 10
+    # Backpressure real do servidor async: handlers async rodam no event loop, e
+    # `maximum_concurrent_rpcs` é o limite que o grpc.aio respeita (RPCs acima do
+    # limite recebem RESOURCE_EXHAUSTED). Um ThreadPoolExecutor NÃO dimensiona a
+    # concorrência dos handlers async — ver app/grpc_server/server.py.
+    grpc_max_concurrent_rpcs: int = 100
 
     # --- Health check HTTP ---
     health_host: str = "0.0.0.0"

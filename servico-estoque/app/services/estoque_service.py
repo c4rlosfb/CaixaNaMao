@@ -3,7 +3,7 @@
 Fluxo de reserva implementado exatamente como especificado em
 `docs/arquitetura.md` §3.3 e no ADR-004:
 
-1. checagem de idempotência no ledger (`movimentacoes`);
+1. checagem de idempotência no ledger (`movimentacoes`), por par (pedido, item);
 2. aquisição do lock distribuído `SET lock:estoque:{item_id} {request_uuid} NX EX 5`
    (falha do Redis ⇒ **fail closed** ⇒ `ESTOQUE_BLOQUEADO`);
 3. transação PostgreSQL com **UPDATE condicional atômico**
@@ -146,22 +146,27 @@ class EstoqueService:
                 f"quantidade deve ser um inteiro maior que zero (recebido: {quantidade!r})",
             )
 
-        # 1. Idempotência: retry do mesmo pedido não reserva duas vezes.
-        reserva_existente = await self._repo.buscar_movimentacao(pedido_id, TipoMovimentacao.RESERVA)
+        # 1. Idempotência por ITEM: retry do mesmo pedido/item não reserva duas
+        #    vezes. O pedido pode ter vários itens (um CheckAndReserve por item).
+        reserva_existente = await self._repo.buscar_movimentacao(
+            pedido_id, TipoMovimentacao.RESERVA, item_id
+        )
         if reserva_existente is not None:
-            if reserva_existente.item_id != item_id or reserva_existente.quantidade != quantidade:
+            if reserva_existente.quantidade != quantidade:
                 logger.warning(
-                    "Retry do pedido %s com parâmetros divergentes da reserva registrada", pedido_id
+                    "Retry do pedido %s para o item %s com quantidade divergente da reserva",
+                    pedido_id,
+                    item_id,
                 )
                 return ResultadoReserva(
                     StatusReserva.CONFLITO_IDEMPOTENCIA,
-                    "Pedido já possui reserva registrada com item/quantidade diferentes",
+                    "Item já reservado neste pedido com quantidade diferente",
                 )
             item = await self._repo.buscar_item(item_id)
-            logger.info("Reserva idempotente (pedido %s já reservado)", pedido_id)
+            logger.info("Reserva idempotente (pedido %s, item %s já reservado)", pedido_id, item_id)
             return ResultadoReserva(
                 StatusReserva.CONFIRMADO,
-                "Reserva já registrada para este pedido (idempotente)",
+                "Reserva já registrada para este item do pedido (idempotente)",
                 ItemResumo.de_item(item) if item else None,
             )
 
@@ -200,14 +205,35 @@ class EstoqueService:
             await self._session.commit()
             resumo = ItemResumo.de_item(item)
         except IntegrityError:
-            # Corrida de idempotência: outra transação/concorrente já registrou a
-            # reserva deste pedido (unique pedido_id+tipo). Reverte e confirma.
+            # Corrida de idempotência: outra transação registrou a reserva deste
+            # par (pedido, item) — unique pedido_id+item_id+tipo. Só devolve
+            # CONFIRMADO depois de reconferir a linha existente: o item tem de
+            # ser o mesmo E a quantidade tem de bater.
             await self._session.rollback()
-            logger.info("Idempotência acionada por corrida concorrente (pedido %s)", pedido_id)
+            existente = await self._repo.buscar_movimentacao(
+                pedido_id, TipoMovimentacao.RESERVA, item_id
+            )
+            if existente is None:
+                logger.exception(
+                    "Violação de integridade inesperada na reserva do item %s (pedido %s)",
+                    item_id,
+                    pedido_id,
+                )
+                raise
+            if existente.quantidade != quantidade:
+                return ResultadoReserva(
+                    StatusReserva.CONFLITO_IDEMPOTENCIA,
+                    "Item já reservado neste pedido com quantidade diferente",
+                )
+            logger.info(
+                "Idempotência acionada por corrida concorrente (pedido %s, item %s)",
+                pedido_id,
+                item_id,
+            )
             item = await self._repo.buscar_item(item_id)
             return ResultadoReserva(
                 StatusReserva.CONFIRMADO,
-                "Reserva já registrada para este pedido (idempotente)",
+                "Reserva já registrada para este item do pedido (idempotente)",
                 ItemResumo.de_item(item) if item else None,
             )
         except SQLAlchemyError:
@@ -242,22 +268,30 @@ class EstoqueService:
                 f"quantidade deve ser um inteiro maior que zero (recebido: {quantidade!r})",
             )
 
-        if await self._repo.buscar_movimentacao(pedido_id, TipoMovimentacao.LIBERACAO) is not None:
-            logger.info("Liberação idempotente (pedido %s já liberado)", pedido_id)
+        if (
+            await self._repo.buscar_movimentacao(
+                pedido_id, TipoMovimentacao.LIBERACAO, item_id
+            )
+            is not None
+        ):
+            logger.info("Liberação idempotente (pedido %s, item %s já liberado)", pedido_id, item_id)
             return ResultadoLiberacao(
-                StatusLiberacao.JA_APLICADA, "Liberação já aplicada para este pedido (idempotente)"
+                StatusLiberacao.JA_APLICADA,
+                "Liberação já aplicada para este item do pedido (idempotente)",
             )
 
-        reserva = await self._repo.buscar_movimentacao(pedido_id, TipoMovimentacao.RESERVA)
+        reserva = await self._repo.buscar_movimentacao(
+            pedido_id, TipoMovimentacao.RESERVA, item_id
+        )
         if reserva is None:
             return ResultadoLiberacao(
                 StatusLiberacao.RESERVA_NAO_ENCONTRADA,
-                "Nenhuma reserva registrada para este pedido",
+                "Nenhuma reserva registrada para este item do pedido",
             )
-        if reserva.item_id != item_id or reserva.quantidade != quantidade:
+        if reserva.quantidade != quantidade:
             return ResultadoLiberacao(
                 StatusLiberacao.PARAMETROS_DIVERGENTES,
-                "Item/quantidade divergem da reserva registrada para o pedido",
+                "Quantidade diverge da reserva registrada para este item",
             )
 
         try:
@@ -288,9 +322,22 @@ class EstoqueService:
             await self._session.commit()
             resumo = ItemResumo.de_item(item)
         except IntegrityError:
+            # Corrida de idempotência na liberação deste par (pedido, item):
+            # só devolve JA_APLICADA se a linha existente for deste item.
             await self._session.rollback()
+            existente = await self._repo.buscar_movimentacao(
+                pedido_id, TipoMovimentacao.LIBERACAO, item_id
+            )
+            if existente is None:
+                logger.exception(
+                    "Violação de integridade inesperada na liberação do item %s (pedido %s)",
+                    item_id,
+                    pedido_id,
+                )
+                raise
             return ResultadoLiberacao(
-                StatusLiberacao.JA_APLICADA, "Liberação já aplicada para este pedido (idempotente)"
+                StatusLiberacao.JA_APLICADA,
+                "Liberação já aplicada para este item do pedido (idempotente)",
             )
         except SQLAlchemyError:
             await self._session.rollback()

@@ -15,14 +15,18 @@ from app.models.base import Base
 class Movimentacao(Base):
     """Registro imutável de uma movimentação de estoque.
 
-    A restrição única `(pedido_id, tipo)` é o backstop de idempotência: se o
-    mesmo pedido tentar reservar duas vezes (retry após timeout, por exemplo),
-    a segunda transação falha na inserção e é revertida — sem decremento duplo.
+    A restrição única `(pedido_id, item_id, tipo)` é o backstop de idempotência:
+    um pedido tem vários itens (o `servico-pedidos` chama `CheckAndReserve` uma
+    vez por item, sempre com o mesmo `pedido_id`), mas o mesmo item não pode ser
+    reservado nem liberado duas vezes pelo mesmo pedido — um retry após timeout,
+    por exemplo, falha na inserção e a transação é revertida, sem débito duplo.
     """
 
     __tablename__ = "movimentacoes"
     __table_args__ = (
-        UniqueConstraint("pedido_id", "tipo", name="uq_movimentacoes_pedido_tipo"),
+        UniqueConstraint(
+            "pedido_id", "item_id", "tipo", name="uq_movimentacoes_pedido_item_tipo"
+        ),
         Index("ix_movimentacoes_item_id", "item_id"),
     )
 

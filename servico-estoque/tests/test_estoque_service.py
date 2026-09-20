@@ -348,3 +348,95 @@ async def test_liberacao_com_quantidade_invalida_nao_altera_saldo(
     await session.refresh(item)
     assert item.quantidade_disponivel == 8
     assert item.quantidade_reservada == 2
+
+
+# ---------------------------------------------------------------------------
+# Pedido com múltiplos itens (regressão do bloqueador apontado no review)
+# O `criar_pedido` do servico-pedidos chama CheckAndReserve UMA VEZ POR ITEM,
+# sempre com o mesmo `pedido_id`.
+# ---------------------------------------------------------------------------
+async def test_pedido_com_multiplos_itens_reserva_todos_os_itens(session, lock_manager, item_factory):
+    item_a = await item_factory(quantidade=10, nome="Coxinha")
+    item_b = await item_factory(quantidade=5, nome="Pastel")
+    pedido_id = uuid.uuid4()
+    servico = EstoqueService(session, lock_manager)
+
+    reserva_a = await servico.reservar(
+        item_id=item_a.id, quantidade=2, pedido_id=pedido_id, request_uuid=uuid.uuid4()
+    )
+    reserva_b = await servico.reservar(
+        item_id=item_b.id, quantidade=3, pedido_id=pedido_id, request_uuid=uuid.uuid4()
+    )
+
+    # Antes da correção, o 2º item recebia CONFLITO_IDEMPOTENCIA (FAILED_PRECONDITION
+    # no gRPC) e qualquer pedido com 2+ itens falhava.
+    assert reserva_a.status is StatusReserva.CONFIRMADO
+    assert reserva_b.status is StatusReserva.CONFIRMADO
+
+    await session.refresh(item_a)
+    await session.refresh(item_b)
+    assert (item_a.quantidade_disponivel, item_a.quantidade_reservada) == (8, 2)
+    assert (item_b.quantidade_disponivel, item_b.quantidade_reservada) == (2, 3)
+
+    movimentacoes = (
+        await session.scalars(select(Movimentacao).where(Movimentacao.pedido_id == pedido_id))
+    ).all()
+    assert sorted(m.item_id for m in movimentacoes) == sorted([item_a.id, item_b.id])
+
+
+async def test_cancelamento_de_pedido_com_multiplos_itens_devolve_todos(session, lock_manager, item_factory):
+    item_a = await item_factory(quantidade=10, nome="Coxinha")
+    item_b = await item_factory(quantidade=5, nome="Pastel")
+    pedido_id = uuid.uuid4()
+    servico = EstoqueService(session, lock_manager)
+    await servico.reservar(
+        item_id=item_a.id, quantidade=2, pedido_id=pedido_id, request_uuid=uuid.uuid4()
+    )
+    await servico.reservar(
+        item_id=item_b.id, quantidade=3, pedido_id=pedido_id, request_uuid=uuid.uuid4()
+    )
+
+    liberacao_a = await servico.liberar(
+        item_id=item_a.id, quantidade=2, pedido_id=pedido_id, request_uuid=uuid.uuid4()
+    )
+    liberacao_b = await servico.liberar(
+        item_id=item_b.id, quantidade=3, pedido_id=pedido_id, request_uuid=uuid.uuid4()
+    )
+
+    # Antes da correção, a 2ª liberação caía em JA_APLICADA sem devolver o estoque.
+    assert liberacao_a.status is StatusLiberacao.APLICADA
+    assert liberacao_b.status is StatusLiberacao.APLICADA
+
+    await session.refresh(item_a)
+    await session.refresh(item_b)
+    assert (item_a.quantidade_disponivel, item_a.quantidade_reservada) == (10, 0)
+    assert (item_b.quantidade_disponivel, item_b.quantidade_reservada) == (5, 0)
+
+
+async def test_retry_do_mesmo_item_segue_idempotente_com_outro_item_no_pedido(
+    session, lock_manager, item_factory
+):
+    """A chave por item não pode afrouxar a idempotência do retry do mesmo item."""
+    item = await item_factory(quantidade=10, nome="Coxinha")
+    outro_item = await item_factory(quantidade=10, nome="Pastel")
+    pedido_id = uuid.uuid4()
+    servico = EstoqueService(session, lock_manager)
+    await servico.reservar(
+        item_id=item.id, quantidade=2, pedido_id=pedido_id, request_uuid=uuid.uuid4()
+    )
+    await servico.reservar(
+        item_id=outro_item.id, quantidade=1, pedido_id=pedido_id, request_uuid=uuid.uuid4()
+    )
+
+    retry = await servico.reservar(
+        item_id=item.id, quantidade=2, pedido_id=pedido_id, request_uuid=uuid.uuid4()
+    )
+    divergente = await servico.reservar(
+        item_id=item.id, quantidade=5, pedido_id=pedido_id, request_uuid=uuid.uuid4()
+    )
+
+    assert retry.status is StatusReserva.CONFIRMADO
+    assert "idempotente" in retry.mensagem
+    assert divergente.status is StatusReserva.CONFLITO_IDEMPOTENCIA
+    await session.refresh(item)
+    assert (item.quantidade_disponivel, item.quantidade_reservada) == (8, 2)

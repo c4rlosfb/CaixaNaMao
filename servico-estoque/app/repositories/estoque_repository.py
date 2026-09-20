@@ -36,10 +36,20 @@ class EstoqueRepository:
         return await self._session.get(Item, item_id)
 
     async def buscar_movimentacao(
-        self, pedido_id: uuid.UUID, tipo: TipoMovimentacao
+        self,
+        pedido_id: uuid.UUID,
+        tipo: TipoMovimentacao,
+        item_id: uuid.UUID,
     ) -> Movimentacao | None:
+        """Movimentação de um pedido **para um item específico**.
+
+        A chave de idempotência é `(pedido_id, item_id, tipo)`: um pedido com
+        vários itens registra uma reserva por item, e o retry do mesmo item é o
+        que precisa ser detectado.
+        """
         stmt = select(Movimentacao).where(
             Movimentacao.pedido_id == pedido_id,
+            Movimentacao.item_id == item_id,
             Movimentacao.tipo == tipo.value,
         )
         return await self._session.scalar(stmt)

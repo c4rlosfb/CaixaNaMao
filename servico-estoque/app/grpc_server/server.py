@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 import grpc
@@ -38,15 +37,20 @@ def montar_servidor_grpc(
     publisher: EventPublisher | None = None,
     host: str = "0.0.0.0",
     port: int = 50051,
-    max_workers: int = 10,
+    max_concurrent_rpcs: int = 100,
 ) -> ServidorEstoque:
-    """Cria (sem iniciar) o servidor gRPC com o `EstoqueService` registrado."""
+    """Cria (sem iniciar) o servidor gRPC com o `EstoqueService` registrado.
+
+    Não há `ThreadPoolExecutor`: todos os handlers do servicer são `async` e rodam
+    no event loop, então `maximum_concurrent_rpcs` é o limite de backpressure que
+    o `grpc.aio` de fato aplica (RPCs acima do limite recebem
+    `RESOURCE_EXHAUSTED`). A concorrência de banco é limitada pelo pool do
+    SQLAlchemy, não por um pool de threads do gRPC.
+    """
     _, estoque_pb2_grpc = carregar_stubs()
 
     servidor = grpc.aio.server(
-        migration_thread_pool=ThreadPoolExecutor(
-            max_workers=max_workers, thread_name_prefix="estoque-grpc"
-        ),
+        maximum_concurrent_rpcs=max_concurrent_rpcs,
         options=OPCOES_PADRAO,
     )
     servicer = criar_servicer(

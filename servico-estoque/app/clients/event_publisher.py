@@ -53,6 +53,7 @@ class SQSEventPublisher:
         self._aws_access_key_id = aws_access_key_id
         self._aws_secret_access_key = aws_secret_access_key
         self._cliente = None
+        self._url_fila: str | None = None  # cache: evita get_queue_url a cada evento
 
     def _obter_cliente(self):  # pragma: no cover - exige AWS/LocalStack
         if self._cliente is None:
@@ -67,10 +68,23 @@ class SQSEventPublisher:
             )
         return self._cliente
 
+    def _obter_url_fila(self) -> str:  # pragma: no cover - exige AWS
+        """URL da fila, resolvida uma única vez (mesmo padrão do servico-pedidos)."""
+        if self._url_fila is None:
+            self._url_fila = self._obter_cliente().get_queue_url(QueueName=self._queue_name)[
+                "QueueUrl"
+            ]
+        return self._url_fila
+
     def _enviar_bloqueante(self, evento: dict[str, object]) -> None:  # pragma: no cover - exige AWS
-        cliente = self._obter_cliente()
-        url_fila = cliente.get_queue_url(QueueName=self._queue_name)["QueueUrl"]
-        cliente.send_message(QueueUrl=url_fila, MessageBody=json.dumps(evento, default=str))
+        try:
+            self._obter_cliente().send_message(
+                QueueUrl=self._obter_url_fila(), MessageBody=json.dumps(evento, default=str)
+            )
+        except Exception:
+            # Cache pode estar desatualizado (fila recriada): descarta e propaga.
+            self._url_fila = None
+            raise
 
     async def publicar_estoque_atualizado(self, *, evento: dict[str, object]) -> None:
         try:

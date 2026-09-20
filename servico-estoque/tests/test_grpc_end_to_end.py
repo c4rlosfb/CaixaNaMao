@@ -180,3 +180,46 @@ async def test_release_sem_reserva_retorna_sucesso_falso(stub, item_factory):
 
     assert resposta.sucesso is False
     assert "reserva" in resposta.mensagem.lower()
+
+
+async def test_dois_itens_do_mesmo_pedido_pelo_contrato(session, stub, item_factory):
+    """Cenário do review: o servico-pedidos chama CheckAndReserve por item com o
+    mesmo `pedido_id` e depois libera cada item no cancelamento."""
+    item_a = await item_factory(quantidade=4, nome="Coxinha")
+    item_b = await item_factory(quantidade=4, nome="Pastel")
+    pedido_id = str(uuid.uuid4())
+
+    resposta_a = await stub.CheckAndReserve(
+        estoque_pb2.ReservaRequest(
+            item_id=str(item_a.id),
+            quantidade=1,
+            pedido_id=pedido_id,
+            request_uuid=str(uuid.uuid4()),
+        )
+    )
+    resposta_b = await stub.CheckAndReserve(
+        estoque_pb2.ReservaRequest(
+            item_id=str(item_b.id),
+            quantidade=2,
+            pedido_id=pedido_id,
+            request_uuid=str(uuid.uuid4()),
+        )
+    )
+
+    assert (resposta_a.sucesso, resposta_a.status) == (True, "CONFIRMADO")
+    assert (resposta_b.sucesso, resposta_b.status) == (True, "CONFIRMADO")
+
+    liberacao_a = await stub.ReleaseReserva(
+        estoque_pb2.ReleaseRequest(item_id=str(item_a.id), quantidade=1, pedido_id=pedido_id)
+    )
+    liberacao_b = await stub.ReleaseReserva(
+        estoque_pb2.ReleaseRequest(item_id=str(item_b.id), quantidade=2, pedido_id=pedido_id)
+    )
+
+    assert liberacao_a.sucesso is True
+    assert liberacao_b.sucesso is True
+
+    await session.refresh(item_a)
+    await session.refresh(item_b)
+    assert (item_a.quantidade_disponivel, item_a.quantidade_reservada) == (4, 0)
+    assert (item_b.quantidade_disponivel, item_b.quantidade_reservada) == (4, 0)

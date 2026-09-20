@@ -22,7 +22,7 @@ from redis.asyncio import Redis
 
 from app.clients.event_publisher import criar_event_publisher
 from app.config import alvo_banco_sanitizado, settings
-from app.db import SessionFactory
+from app.db import SessionFactory, engine
 from app.grpc_server.server import montar_servidor_grpc
 from app.health import criar_app_health
 from app.locking.redis_lock import RedisLockManager
@@ -69,7 +69,7 @@ async def _executar() -> None:
         publisher=publisher,
         host=settings.grpc_host,
         port=settings.grpc_port,
-        max_workers=settings.grpc_max_workers,
+        max_concurrent_rpcs=settings.grpc_max_concurrent_rpcs,
     )
     await estoque_grpc.servidor.start()
     logger.info("gRPC escutando em %s:%s", settings.grpc_host, estoque_grpc.porta)
@@ -102,6 +102,8 @@ async def _executar() -> None:
     tarefa_parada.cancel()
     await estoque_grpc.servidor.stop(grace=5)
     await redis.aclose()
+    # Fecha o pool do SQLAlchemy (sem isso as conexões ficam até o processo morrer).
+    await engine.dispose()
     logger.info("servico-estoque encerrado")
 
 
