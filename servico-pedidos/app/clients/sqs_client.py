@@ -20,6 +20,7 @@ import uuid
 from datetime import datetime, timezone
 
 import boto3
+from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 
 from app.config import settings
@@ -35,6 +36,13 @@ class SQSClient:
             "region_name": settings.aws_default_region,
             "aws_access_key_id": settings.aws_access_key_id,
             "aws_secret_access_key": settings.aws_secret_access_key,
+            # Best-effort não pode virar espera longa: falha rápido e não fica
+            # retentando com conexão pendurada (a publicação nunca bloqueia o 201).
+            "config": Config(
+                connect_timeout=2.0,
+                read_timeout=2.0,
+                retries={"max_attempts": 1, "mode": "standard"},
+            ),
         }
         if settings.aws_endpoint_url:
             kwargs["endpoint_url"] = settings.aws_endpoint_url

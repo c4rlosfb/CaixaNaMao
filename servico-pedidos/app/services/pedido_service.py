@@ -17,6 +17,7 @@ Se a persistência falhar depois da reserva, o estoque é **compensado**
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from decimal import Decimal
@@ -35,6 +36,35 @@ from app.schemas.pedido import PedidoCreate
 logger = logging.getLogger(__name__)
 
 _NAMESPACE_PEDIDO = "caixanamao/pedidos"
+
+# Publicações de eventos em voo (best-effort). Ficam registradas para não serem
+# coletadas pelo GC no meio do envio e para poderem ser aguardadas por
+# `aguardar_publicacoes()` (testes e shutdown gracioso).
+_tarefas_publicacao: set[asyncio.Task[None]] = set()
+
+
+def _agendar_publicacao(funcao, **kwargs) -> None:
+    """Agenda a publicação (síncrona, boto3) em thread e **não** aguarda.
+
+    Publicar dentro do handler somaria a latência do broker à resposta do POST
+    (com a fila inalcançável, ~7s medidos) e ainda bloquearia o event loop, já
+    que o cliente boto3 é síncrono. A operação está commitada e a publicação é
+    best-effort (ADR-005): o que importa é a ordem (depois do commit), não a
+    espera.
+    """
+    tarefa = asyncio.create_task(asyncio.to_thread(funcao, **kwargs))
+    _tarefas_publicacao.add(tarefa)
+    tarefa.add_done_callback(_tarefas_publicacao.discard)
+
+
+async def aguardar_publicacoes() -> None:
+    """Aguarda as publicações de eventos em voo (shutdown gracioso e testes)."""
+    while _tarefas_publicacao:
+        await asyncio.gather(*list(_tarefas_publicacao), return_exceptions=True)
+        # `gather` sobre tarefas já concluídas retorna sem ceder o controle: sem este
+        # `sleep(0)` o laço giraria em busy loop antes de o callback de conclusão
+        # (que limpa o conjunto) rodar.
+        await asyncio.sleep(0)
 
 
 def pedido_id_idempotente(chave: str) -> uuid.UUID:
@@ -153,8 +183,11 @@ class PedidoService:
                 detail="Falha ao persistir o pedido; estoque liberado",
             ) from exc
 
-        # 3. Publica o evento (best-effort) — só depois do commit.
-        self._sqs.publish_pedido_criado(
+        # 3. Publica o evento (best-effort) — só depois do commit e SEM bloquear a
+        #    resposta: o envio do boto3 é síncrono e roda em thread (ver
+        #    `_agendar_publicacao`).
+        _agendar_publicacao(
+            self._sqs.publish_pedido_criado,
             pedido_id=pedido.id,
             vendedor_id=vendedor_id,
             total=str(total),

@@ -7,6 +7,7 @@ de estoque — bloqueadores do review do PR #26.
 
 from __future__ import annotations
 
+import time
 import uuid
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
@@ -22,7 +23,11 @@ from app.models.enums import StatusPedido
 from app.models.pedido import Pedido
 from app.repositories.pedido_repository import PedidoRepository
 from app.schemas.pedido import ItemPedidoCreate, PedidoCreate
-from app.services.pedido_service import PedidoService, pedido_id_idempotente
+from app.services.pedido_service import (
+    PedidoService,
+    aguardar_publicacoes,
+    pedido_id_idempotente,
+)
 
 
 def _dto(*itens: tuple[uuid.UUID, int, str]) -> PedidoCreate:
@@ -74,6 +79,10 @@ async def test_criar_pedido_persiste_publica_evento_e_mantem_decimal(
     assert pedido.total == Decimal("20.10")
     assert mock_estoque_ok.check_and_reserve.await_count == 2
 
+    # A publicação é agendada (não bloqueia a resposta): aguarda o flush para
+    # inspecionar o evento.
+    await aguardar_publicacoes()
+
     # Evento publicado UMA vez, com o total serializado a partir do Decimal
     mock_sqs.publish_pedido_criado.assert_called_once()
     kwargs = mock_sqs.publish_pedido_criado.call_args.kwargs
@@ -105,8 +114,47 @@ async def test_commit_acontece_antes_da_publicacao(
     mock_sqs.publish_pedido_criado = MagicMock(side_effect=_publish_espiao)
 
     await service.criar_pedido(vendedor_id=uuid.uuid4(), payload=_dto((uuid.uuid4(), 1, "5.00")))
+    await aguardar_publicacoes()
 
     assert ordem == ["commit", "publish"]
+
+
+async def test_publicacao_nao_bloqueia_a_resposta_do_post(service, mock_estoque_ok, mock_sqs):
+    """Best-effort de verdade: a resposta não espera o broker.
+
+    Com a fila inalcançável, aguardar o boto3 adicionava ~7s a cada POST (medido
+    contra o servico-estoque real) — acima do timeout dos clientes.
+    """
+
+    def _publish_lento(**kwargs) -> bool:
+        time.sleep(2.0)
+        return True
+
+    mock_sqs.publish_pedido_criado = MagicMock(side_effect=_publish_lento)
+
+    inicio = time.perf_counter()
+    await service.criar_pedido(vendedor_id=uuid.uuid4(), payload=_dto((uuid.uuid4(), 1, "5.00")))
+    duracao = time.perf_counter() - inicio
+
+    assert duracao < 1.0, f"o POST esperou o broker por {duracao:.2f}s"
+    await aguardar_publicacoes()
+    mock_sqs.publish_pedido_criado.assert_called_once()
+
+
+async def test_falha_de_publicacao_nao_afeta_o_pedido(service, mock_estoque_ok, mock_sqs):
+    """Falha do SQS não propaga nem marca o pedido como não criado."""
+
+    def _publish_que_falha(**kwargs) -> bool:
+        raise RuntimeError("broker fora do ar")
+
+    mock_sqs.publish_pedido_criado = MagicMock(side_effect=_publish_que_falha)
+
+    pedido = await service.criar_pedido(
+        vendedor_id=uuid.uuid4(), payload=_dto((uuid.uuid4(), 1, "5.00"))
+    )
+
+    await aguardar_publicacoes()
+    assert pedido.status == StatusPedido.CONFIRMADO
 
 
 # ---------------------------------------------------------------------------
@@ -188,6 +236,7 @@ async def test_idempotency_key_reapresentada_devolve_o_mesmo_pedido(
     )
 
     assert primeira.id == segunda.id == pedido_id_idempotente(chave)
+    await aguardar_publicacoes()
     # A segunda chamada não reserva estoque de novo nem publica outro evento
     assert mock_estoque_ok.check_and_reserve.await_count == 1
     mock_sqs.publish_pedido_criado.assert_called_once()

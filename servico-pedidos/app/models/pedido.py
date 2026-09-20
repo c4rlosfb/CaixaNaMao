@@ -1,7 +1,8 @@
 import uuid
 from datetime import datetime, timezone
+from decimal import Decimal
 
-from sqlalchemy import ForeignKey, Numeric, String
+from sqlalchemy import DateTime, ForeignKey, Numeric, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -23,10 +24,16 @@ class Pedido(Base):
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default=StatusPedido.PENDENTE
     )
-    total: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
-    criado_em: Mapped[datetime] = mapped_column(nullable=False, default=_utcnow)
+    total: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    # `DateTime(timezone=True)` é obrigatório para casar com o `TIMESTAMP WITH TIME
+    # ZONE` da migration: sem o tipo explícito o SQLAlchemy infere um timestamp
+    # naive e o asyncpg recusa o `datetime` com UTC no INSERT (bug pego no e2e
+    # contra PostgreSQL real — o SQLite dos testes aceita).
+    criado_em: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
     atualizado_em: Mapped[datetime] = mapped_column(
-        nullable=False, default=_utcnow, onupdate=_utcnow
+        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
     )
 
     itens: Mapped[list["ItemPedido"]] = relationship(
@@ -45,6 +52,6 @@ class ItemPedido(Base):
     )
     item_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     quantidade: Mapped[int] = mapped_column(nullable=False)
-    preco_unitario: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
+    preco_unitario: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
 
     pedido: Mapped["Pedido"] = relationship("Pedido", back_populates="itens")
