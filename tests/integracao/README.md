@@ -38,9 +38,9 @@ também nunca passa fingindo que verificou algo.
 
 | Variável | Default | Para que serve |
 |---|---|---|
-| `PEDIDOS_BASE_URL` | `http://localhost:8000` | REST do `servico-pedidos` |
-| `ESTOQUE_GRPC_ADDRESS` | `localhost:50051` | gRPC do `servico-estoque` |
-| `ESTOQUE_DATABASE_URL` | `postgresql://estoque_user:estoque_pass@localhost:5432/estoque_db` | semear e observar itens |
+| `PEDIDOS_BASE_URL` | `http://127.0.0.1:8000` | REST do `servico-pedidos` |
+| `ESTOQUE_GRPC_ADDRESS` | `127.0.0.1:50051` | gRPC do `servico-estoque` |
+| `ESTOQUE_DATABASE_URL` | `postgresql://estoque_user:estoque_pass@127.0.0.1:5432/estoque_db` | semear e observar itens |
 | `JWT_SECRET` | `dev-secret-troque-em-producao` | assinar o token do vendedor (HS256) |
 
 ## O que é verificado

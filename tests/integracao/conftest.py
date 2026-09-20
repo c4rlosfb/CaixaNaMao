@@ -19,9 +19,9 @@ Variáveis de ambiente (todas com default de desenvolvimento):
 
 | Variável | Default | Para que serve |
 |---|---|---|
-| `PEDIDOS_BASE_URL` | `http://localhost:8000` | REST do servico-pedidos |
-| `ESTOQUE_GRPC_ADDRESS` | `localhost:50051` | gRPC do servico-estoque |
-| `ESTOQUE_DATABASE_URL` | `postgresql://estoque_user:estoque_pass@localhost:5432/estoque_db` | semear/observar itens no estoque |
+| `PEDIDOS_BASE_URL` | `http://127.0.0.1:8000` | REST do servico-pedidos |
+| `ESTOQUE_GRPC_ADDRESS` | `127.0.0.1:50051` | gRPC do servico-estoque |
+| `ESTOQUE_DATABASE_URL` | `postgresql://estoque_user:estoque_pass@127.0.0.1:5432/estoque_db` | semear/observar itens no estoque |
 | `JWT_SECRET` | `dev-secret-troque-em-producao` | assinar o token do vendedor (HS256, ADR-001) |
 """
 
@@ -45,11 +45,11 @@ import pytest
 RAIZ = Path(__file__).resolve().parents[2]
 CONTRATO = RAIZ / "shared-protos" / "estoque.proto"
 
-PEDIDOS_BASE_URL = os.environ.get("PEDIDOS_BASE_URL", "http://localhost:8000")
-ESTOQUE_GRPC_ADDRESS = os.environ.get("ESTOQUE_GRPC_ADDRESS", "localhost:50051")
+PEDIDOS_BASE_URL = os.environ.get("PEDIDOS_BASE_URL", "http://127.0.0.1:8000")
+ESTOQUE_GRPC_ADDRESS = os.environ.get("ESTOQUE_GRPC_ADDRESS", "127.0.0.1:50051")
 ESTOQUE_DATABASE_URL = os.environ.get(
     "ESTOQUE_DATABASE_URL",
-    "postgresql://estoque_user:estoque_pass@localhost:5432/estoque_db",
+    "postgresql://estoque_user:estoque_pass@127.0.0.1:5432/estoque_db",
 )
 JWT_SECRET = os.environ.get("JWT_SECRET", "dev-secret-troque-em-producao")
 
@@ -120,7 +120,7 @@ def stack() -> None:
         faltando.append(f"servico-pedidos (REST) em {PEDIDOS_BASE_URL}/health")
 
     host_grpc, _, porta_grpc = ESTOQUE_GRPC_ADDRESS.partition(":")
-    if not _tcp_acessivel(host_grpc or "localhost", int(porta_grpc or 50051)):
+    if not _tcp_acessivel(host_grpc or "127.0.0.1", int(porta_grpc or 50051)):
         faltando.append(f"servico-estoque (gRPC) em {ESTOQUE_GRPC_ADDRESS}")
 
     try:
