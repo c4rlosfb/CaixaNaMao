@@ -3,8 +3,13 @@
 Decisão: fire-and-forget (ADR-005 + docs/arquitetura.md §4.3).
 Falha de publicação é logada mas NÃO bloqueia o retorno 201.
 
-Fila: caixanamao-pedidos-criados (Standard Queue — at-least-once delivery).
-O consumidor DEVE ser idempotente via event_id.
+Fila: `caixanamao-pedidos-criados` — **Standard** (at-least-once, sem ordenação).
+Por isso:
+
+* nenhum `MessageGroupId`/`MessageDeduplicationId` é enviado: esses parâmetros
+  são exclusivos de filas FIFO e o SQS devolve `InvalidParameterValue` quando
+  vêm para uma fila Standard (o evento nunca era publicado);
+* o consumidor DEVE ser idempotente via `event_id`.
 """
 
 from __future__ import annotations
@@ -38,6 +43,7 @@ class SQSClient:
         self._queue_url: str | None = None
 
     def _get_queue_url(self) -> str:
+        """URL da fila, resolvida uma única vez por processo."""
         if self._queue_url is None:
             response = self._sqs.get_queue_url(QueueName=settings.sqs_queue_pedidos)
             self._queue_url = response["QueueUrl"]
@@ -47,10 +53,15 @@ class SQSClient:
         self,
         pedido_id: uuid.UUID,
         vendedor_id: uuid.UUID,
-        total: float,
+        total: str,
         itens: list[dict],
-    ) -> None:
-        """Publica evento PedidoCriado. Falhas são logadas e silenciadas (fire-and-forget)."""
+    ) -> bool:
+        """Publica o evento PedidoCriado.
+
+        Best-effort: falha é logada e devolvida como `False` — nunca propaga para
+        o cliente (a política está em ADR-005 e na matriz de riscos). Chamar
+        **após** o commit do pedido.
+        """
         event = {
             "event_id": str(uuid.uuid4()),  # idempotência no consumidor
             "event_type": "PedidoCriado",
@@ -63,20 +74,20 @@ class SQSClient:
             },
         }
         try:
-            queue_url = self._get_queue_url()
             self._sqs.send_message(
-                QueueUrl=queue_url,
+                QueueUrl=self._get_queue_url(),
                 MessageBody=json.dumps(event),
-                MessageGroupId=str(vendedor_id),  # para FIFO futuro
             )
             logger.info("Evento PedidoCriado publicado: pedido_id=%s", pedido_id)
-        except (BotoCoreError, ClientError, Exception) as exc:
-            # fire-and-forget: log e continua — não propaga para o cliente
+            return True
+        except (BotoCoreError, ClientError) as exc:
             logger.error(
-                "Falha ao publicar PedidoCriado no SQS (pedido_id=%s): %s",
+                "Falha ao publicar PedidoCriado no SQS (pedido_id=%s, fila=%s): %s",
                 pedido_id,
+                settings.sqs_queue_pedidos,
                 exc,
             )
+            return False
 
 
 # Instância singleton

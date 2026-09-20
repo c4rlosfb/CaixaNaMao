@@ -3,16 +3,15 @@
 import asyncio
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-from app.config import settings
-from app.models.base import Base
-
 # Importa todos os modelos para que o autogenerate funcione
 import app.models.pedido  # noqa: F401
+from alembic import context
+from app.config import settings
+from app.models.base import Base
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.database_url)

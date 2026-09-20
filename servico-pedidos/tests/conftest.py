@@ -1,10 +1,16 @@
-"""Fixtures compartilhadas entre todos os testes do servico-pedidos."""
+"""Fixtures compartilhadas entre todos os testes do servico-pedidos.
+
+Princípio: os testes usam a **API real** do serviço (`PedidoService(db, estoque,
+sqs)`, sessão de banco verdadeira) e só os clientes externos (gRPC/SQS) são
+substituídos. Assim o contrato testado é o que roda em produção — contratos de
+mock divergentes foram um dos bloqueadores do review do PR #26.
+"""
 
 from __future__ import annotations
 
 import uuid
+from collections.abc import AsyncGenerator
 from datetime import datetime, timedelta, timezone
-from typing import AsyncGenerator
 from unittest.mock import AsyncMock, MagicMock
 
 import jwt
@@ -13,43 +19,63 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.clients.estoque_client import EstoqueClient, ReservaResult, ReleaseResult, StatusReserva
-from app.clients.sqs_client import SQSClient
-from app.dependencies import get_current_user, get_db
-from app.clients.estoque_client import get_estoque_client
-from app.clients.sqs_client import get_sqs_client
+from app.clients.estoque_client import (
+    EstoqueClient,
+    ReleaseResult,
+    ReservaResult,
+    StatusReserva,
+    get_estoque_client,
+)
+from app.clients.sqs_client import SQSClient, get_sqs_client
+from app.config import settings
+from app.dependencies import get_db
 from app.main import app
 from app.models.base import Base
 
 # ---------------------------------------------------------------------------
-# Banco em memória (SQLite async via aiosqlite)
+# Banco de testes: SQLite async em arquivo (isolado por execução)
 # ---------------------------------------------------------------------------
 
-TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 
-_test_engine = create_async_engine(TEST_DATABASE_URL, echo=False)
-_TestSessionFactory = async_sessionmaker(_test_engine, expire_on_commit=False)
-
-
-@pytest_asyncio.fixture(autouse=True)
-async def setup_db() -> AsyncGenerator[None, None]:
-    """Cria e destrói tabelas para cada teste."""
-    async with _test_engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    yield
-    async with _test_engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
+@pytest.fixture(scope="session")
+def sqlite_url(tmp_path_factory) -> str:
+    caminho = tmp_path_factory.mktemp("db") / "pedidos_test.db"
+    return f"sqlite+aiosqlite:///{caminho.as_posix()}"
 
 
 @pytest_asyncio.fixture
-async def db_session() -> AsyncGenerator[AsyncSession, None]:
-    async with _TestSessionFactory() as session:
+async def engine(sqlite_url: str):
+    eng = create_async_engine(sqlite_url, echo=False)
+    async with eng.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    yield eng
+    await eng.dispose()
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def setup_db(engine) -> AsyncGenerator[None, None]:
+    """Recria as tabelas antes de cada teste (isolamento entre testes)."""
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+        await conn.run_sync(Base.metadata.create_all)
+    yield
+
+
+@pytest_asyncio.fixture
+async def session_factory(engine) -> async_sessionmaker:
+    return async_sessionmaker(engine, expire_on_commit=False)
+
+
+@pytest_asyncio.fixture
+async def db_session(session_factory) -> AsyncGenerator[AsyncSession, None]:
+    async with session_factory() as session:
         yield session
 
 
 # ---------------------------------------------------------------------------
-# Mocks de clientes externos
+# Mocks dos clientes externos (gRPC e SQS)
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def mock_estoque_ok() -> EstoqueClient:
@@ -81,8 +107,9 @@ def mock_estoque_insuficiente() -> EstoqueClient:
 
 @pytest.fixture
 def mock_sqs() -> SQSClient:
+    """Publisher SQS síncrono (fire-and-forget), como em produção."""
     mock = MagicMock(spec=SQSClient)
-    mock.publish_pedido_criado = MagicMock()  # síncrono (fire-and-forget)
+    mock.publish_pedido_criado = MagicMock(return_value=True)
     return mock
 
 
@@ -104,22 +131,37 @@ def make_test_token(
 
 
 # ---------------------------------------------------------------------------
-# AsyncClient configurado com overrides
+# AsyncClient com overrides (banco de teste + clientes mockados)
 # ---------------------------------------------------------------------------
+
+
+def _configurar_overrides(
+    db_session: AsyncSession,
+    estoque: EstoqueClient,
+    sqs: SQSClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Aponta as dependências do app para o banco de teste e os mocks informados."""
+    # monkeypatch em vez de mutar o objeto global: o valor é restaurado no fim do teste.
+    monkeypatch.setattr(settings, "jwt_secret", TEST_JWT_SECRET, raising=True)
+
+    async def _override_get_db() -> AsyncGenerator[AsyncSession, None]:
+        yield db_session
+
+    app.dependency_overrides[get_db] = _override_get_db
+    app.dependency_overrides[get_estoque_client] = lambda: estoque
+    app.dependency_overrides[get_sqs_client] = lambda: sqs
+
 
 @pytest_asyncio.fixture
 async def client(
     db_session: AsyncSession,
     mock_estoque_ok: EstoqueClient,
     mock_sqs: SQSClient,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> AsyncGenerator[AsyncClient, None]:
-    """HTTP client com banco em memória e clientes externos mockados."""
-    import app.config as cfg_module
-    cfg_module.settings.jwt_secret = TEST_JWT_SECRET  # type: ignore[assignment]
-
-    app.dependency_overrides[get_db] = lambda: _db_gen(db_session)
-    app.dependency_overrides[get_estoque_client] = lambda: mock_estoque_ok
-    app.dependency_overrides[get_sqs_client] = lambda: mock_sqs
+    """HTTP client com banco de teste e estoque respondendo com sucesso."""
+    _configurar_overrides(db_session, mock_estoque_ok, mock_sqs, monkeypatch)
 
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://testserver"
@@ -129,5 +171,19 @@ async def client(
     app.dependency_overrides.clear()
 
 
-async def _db_gen(session: AsyncSession):
-    yield session
+@pytest_asyncio.fixture
+async def client_estoque_insuficiente(
+    db_session: AsyncSession,
+    mock_estoque_insuficiente: EstoqueClient,
+    mock_sqs: SQSClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> AsyncGenerator[AsyncClient, None]:
+    """HTTP client com estoque recusando a reserva por saldo insuficiente."""
+    _configurar_overrides(db_session, mock_estoque_insuficiente, mock_sqs, monkeypatch)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://testserver"
+    ) as ac:
+        yield ac
+
+    app.dependency_overrides.clear()

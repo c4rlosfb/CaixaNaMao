@@ -3,16 +3,11 @@
 from __future__ import annotations
 
 import uuid
-from unittest.mock import MagicMock, AsyncMock
 
 import pytest
 from httpx import AsyncClient
 
-from app.clients.estoque_client import ReservaResult, ReleaseResult, StatusReserva, get_estoque_client
-from app.clients.sqs_client import get_sqs_client
-from app.dependencies import get_db
-from app.main import app
-from tests.conftest import TEST_VENDEDOR_ID, make_test_token, _db_gen, _TestSessionFactory
+from tests.conftest import TEST_VENDEDOR_ID, make_test_token
 
 pytestmark = pytest.mark.asyncio
 
@@ -72,24 +67,12 @@ async def test_criar_pedido_token_expirado(client: AsyncClient) -> None:
     assert response.status_code == 401
 
 
-async def test_criar_pedido_estoque_insuficiente(
-    db_session, mock_estoque_insuficiente, mock_sqs
-) -> None:
-    app.dependency_overrides[get_db] = lambda: _db_gen(db_session)
-    app.dependency_overrides[get_estoque_client] = lambda: mock_estoque_insuficiente
-    app.dependency_overrides[get_sqs_client] = lambda: mock_sqs
-
-    import app.config as cfg_module
-    cfg_module.settings.jwt_secret = "secret-de-teste-nao-usar-em-producao"
-
-    from httpx import ASGITransport
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as ac:
-        response = await ac.post(
-            "/pedidos",
-            json=PAYLOAD_VALIDO,
-            headers={"Authorization": f"Bearer {VALID_TOKEN}"},
-        )
-    app.dependency_overrides.clear()
+async def test_criar_pedido_estoque_insuficiente(client_estoque_insuficiente: AsyncClient) -> None:
+    response = await client_estoque_insuficiente.post(
+        "/pedidos",
+        json=PAYLOAD_VALIDO,
+        headers={"Authorization": f"Bearer {VALID_TOKEN}"},
+    )
 
     assert response.status_code == 422
     assert "insuficiente" in response.json()["detail"].lower()

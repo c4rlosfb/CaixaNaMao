@@ -3,12 +3,20 @@
 Encapsula o canal gRPC e expõe métodos Python tipados.
 O canal é criado uma única vez (singleton) e reutilizado entre requests.
 
-Nota: os stubs (estoque_pb2, estoque_pb2_grpc) são gerados em build time via:
-    python -m grpc_tools.protoc \\
-        -I../shared-protos \\
-        --python_out=. \\
-        --grpc_python_out=. \\
-        ../shared-protos/estoque.proto
+Nota: os stubs (estoque_pb2, estoque_pb2_grpc) são gerados em build time pelo
+Dockerfile do serviço (contexto de build = raiz do repositório). Para gerar
+localmente, a partir da raiz do repositório:
+
+    python -m grpc_tools.protoc -I shared-protos \
+        --python_out=servico-pedidos/app/clients \
+        --grpc_python_out=servico-pedidos/app/clients \
+        shared-protos/estoque.proto
+    sed -i 's|^import estoque_pb2 as estoque__pb2$|from app.clients import estoque_pb2 as estoque__pb2|' \
+        servico-pedidos/app/clients/estoque_pb2_grpc.py
+
+O `sed` é obrigatório: o protoc gera `import estoque_pb2` (absoluto) no
+`*_pb2_grpc.py`, e esse import não resolve quando o módulo é carregado como
+`app.clients.estoque_pb2_grpc` — sem ele o cliente cai em `disponivel == False`.
 
 Os arquivos gerados (*_pb2.py) estão no .gitignore — nunca versionados.
 """
@@ -60,11 +68,17 @@ class EstoqueClient:
             self._available = True
         except ImportError:
             logger.warning(
-                "Stubs gRPC não encontrados. Execute 'make proto' antes de usar "
-                "o EstoqueClient em produção. Em testes, use MockEstoqueClient."
+                "Stubs gRPC não encontrados. Gere-os conforme o comando no docstring "
+                "deste módulo (ou use a imagem Docker do serviço). Em testes, use "
+                "MockEstoqueClient."
             )
             self._stub = None
             self._available = False
+
+    @property
+    def disponivel(self) -> bool:
+        """True quando os stubs do contrato foram carregados (canal pronto para uso)."""
+        return self._available
 
     async def check_and_reserve(
         self,

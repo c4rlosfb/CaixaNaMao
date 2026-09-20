@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.clients.estoque_client import EstoqueClient, get_estoque_client
+from app.db import dispose_engine
 from app.routers import pedidos
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(name)s | %(message)s")
@@ -18,12 +19,14 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Inicializa e encerra recursos compartilhados (canal gRPC, etc.)."""
+    """Inicializa e encerra recursos compartilhados (canal gRPC, pool do banco)."""
     logger.info("Iniciando servico-pedidos...")
     client: EstoqueClient = get_estoque_client()
     yield
     logger.info("Encerrando servico-pedidos...")
     await client.close()
+    # Fecha o pool do SQLAlchemy (sem isso as conexões ficam até o processo morrer).
+    await dispose_engine()
 
 
 app = FastAPI(

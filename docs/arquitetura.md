@@ -130,12 +130,17 @@ refresh_tokens (id UUID PK, usuario_id UUID FK, token_hash TEXT UNIQUE,
 
 **Endpoints principais:**
 
-```
-POST   /pedidos            → cria pedido (dispara reserva de estoque)
+```text
+POST   /pedidos            → cria pedido (dispara reserva de estoque; aceita o header Idempotency-Key)
 GET    /pedidos/{id}       → consulta pedido por ID
-GET    /pedidos?vendedor=  → lista pedidos de um vendedor
+GET    /pedidos?limit=&offset= → lista os pedidos do vendedor autenticado
 PATCH  /pedidos/{id}/cancelar → cancela pedido (libera estoque)
 ```
+
+> **Autoria do filtro:** a listagem é sempre filtrada pelo `vendedor_id` extraído do JWT
+> (nunca por um parâmetro de query) — um vendedor não enxerga pedidos de outro. O
+> `vendedor_id` do token é também a chave de idempotência usada nas chamadas gRPC ao
+> `servico-estoque`. Paginação: `limit` (1..100, padrão 20) e `offset` (padrão 0).
 
 **Fluxo de criação de pedido (happy path):**
 

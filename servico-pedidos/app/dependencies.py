@@ -1,27 +1,16 @@
 """Dependências FastAPI injetáveis: sessão de banco e usuário autenticado."""
 
-from collections.abc import AsyncGenerator
+from __future__ import annotations
 
-from fastapi import Depends, HTTPException, status
+from collections.abc import AsyncGenerator
+from typing import Annotated
+
+from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.jwt import TokenPayload, decode_token
-from app.config import settings
-
-# ---------------------------------------------------------------------------
-# Engine e SessionFactory (singleton por processo)
-# ---------------------------------------------------------------------------
-
-engine = create_async_engine(
-    settings.database_url,
-    echo=False,
-    pool_pre_ping=True,
-    pool_size=10,
-    max_overflow=20,
-)
-
-AsyncSessionFactory = async_sessionmaker(engine, expire_on_commit=False)
+from app.db import AsyncSessionFactory
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
@@ -43,7 +32,7 @@ _bearer = HTTPBearer(auto_error=True)
 
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(_bearer),
+    credentials: Annotated[HTTPAuthorizationCredentials, Depends(_bearer)],
 ) -> TokenPayload:
     """Valida o Bearer JWT localmente (HS256) e retorna o payload do token.
 

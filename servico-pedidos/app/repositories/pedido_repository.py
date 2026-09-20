@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import uuid
+from decimal import Decimal
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.pedido import ItemPedido, Pedido
 from app.models.enums import StatusPedido
+from app.models.pedido import ItemPedido, Pedido
 from app.schemas.pedido import ItemPedidoCreate
 
 
@@ -21,9 +22,16 @@ class PedidoRepository:
         self,
         vendedor_id: uuid.UUID,
         itens: list[ItemPedidoCreate],
-        total: float,
+        total: Decimal,
+        pedido_id: uuid.UUID | None = None,
     ) -> Pedido:
+        """Insere o pedido (sem commit — o commit é responsabilidade do serviço).
+
+        `pedido_id` é informado quando vem de uma `Idempotency-Key` do cliente,
+        para que o mesmo retry gere o mesmo pedido.
+        """
         pedido = Pedido(
+            id=pedido_id or uuid.uuid4(),
             vendedor_id=vendedor_id,
             status=StatusPedido.CONFIRMADO,
             total=total,
@@ -37,7 +45,7 @@ class PedidoRepository:
             for item in itens
         ]
         self._db.add(pedido)
-        await self._db.flush()  # obtém o ID sem commitar (commit feito pela dependência)
+        await self._db.flush()  # obtém o ID sem commitar
         await self._db.refresh(pedido, ["itens"])
         return pedido
 

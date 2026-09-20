@@ -5,23 +5,27 @@ Revises:
 Create Date: 2026-09-18
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 import sqlalchemy as sa
-from alembic import op
 from sqlalchemy.dialects.postgresql import UUID
 
+from alembic import op
+
 revision: str = "0001"
-down_revision: Union[str, None] = None
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = None
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
     op.create_table(
         "pedidos",
         sa.Column("id", UUID(as_uuid=True), primary_key=True),
-        sa.Column("vendedor_id", UUID(as_uuid=True), nullable=False, index=True),
+        # O índice de vendedor é criado explicitamente logo abaixo
+        # (`ix_pedidos_vendedor_id`): com `index=True` aqui, o Alembic emitia
+        # DOIS CREATE INDEX para a mesma coluna.
+        sa.Column("vendedor_id", UUID(as_uuid=True), nullable=False),
         sa.Column("status", sa.String(20), nullable=False, server_default="CONFIRMADO"),
         sa.Column("total", sa.Numeric(12, 2), nullable=False),
         sa.Column(
