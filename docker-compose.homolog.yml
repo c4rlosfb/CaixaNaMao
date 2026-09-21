@@ -1,0 +1,38 @@
+# =============================================================================
+# Override de HOMOLOGAÇÃO (nuvem / EC2)
+#
+#   docker compose -f docker-compose.yml -f docker-compose.homolog.yml up -d --build
+#   (ou simplesmente: bash scripts/deploy.sh)
+#
+# Objetivo: deixar público SÓ o servico-pedidos (8000). PostgreSQL, Redis,
+# LocalStack e o gRPC do estoque passam a escutar apenas no loopback da máquina —
+# seguem acessíveis para diagnóstico e para a suíte de integração rodando na
+# própria instância, mas não pela internet.
+#
+# `!override` substitui a lista de portas do arquivo base em vez de concatenar
+# (requer Compose >= 2.24). Sem ele, o Compose manteria as portas do arquivo base
+# publicadas em 0.0.0.0 e o override não teria efeito prático.
+# =============================================================================
+
+services:
+  servico-pedidos:
+    ports: !override
+      # Única porta pública: é a que está liberada no Security Group.
+      - "0.0.0.0:8000:8000"
+
+  servico-estoque:
+    ports: !override
+      - "127.0.0.1:50051:50051" # gRPC — usado pela suíte de integração na máquina
+      - "127.0.0.1:8002:8002" # health do estoque — diagnóstico
+
+  postgres:
+    ports: !override
+      - "127.0.0.1:5432:5432"
+
+  redis:
+    ports: !override
+      - "127.0.0.1:6379:6379"
+
+  localstack:
+    ports: !override
+      - "127.0.0.1:4566:4566"
