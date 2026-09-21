@@ -92,20 +92,26 @@ sudo chmod 600 /swapfile
 sudo mkswap /swapfile
 sudo swapon /swapfile
 ```
-*(Opcional para persistir após reboot: `echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab`)*
+*(Persistir o Swap após reboot é recomendado — use `echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab`.)*
+
+> [!IMPORTANT]
+> Com o `restart: unless-stopped` do override de homologação, os containers sobem sozinhos após um reboot da instância — e sem o Swap persistido essa subida automática pode acionar o OOM Killer. Persista o Swap antes de considerar o ambiente pronto.
 
 ### 4.4 Clonagem do Repositório e Checkout
 ```bash
 git clone https://github.com/c4rlosfb/CaixaNaMao.git
 cd CaixaNaMao
-git checkout feat/issue-8-deploy-aws
+git checkout dev
 ```
+
+> [!NOTE]
+> Os artefatos de homologação (`docker-compose.homolog.yml` e `scripts/deploy.sh`) passam a fazer parte da `dev` com este PR. Enquanto ele não estiver mergeado, use a própria branch do PR: `git checkout feat/issue-8-deploy-aws`.
 
 ---
 
 ## 5. Execução do Deploy Automatizado
 
-O deploy é gerenciado pelo script [`scripts/deploy.sh`](file:///c:/Users/Luan%20Dias/Desktop/CaixaNaMao/scripts/deploy.sh), que realiza todo o ciclo de vida da homologação:
+O deploy é gerenciado pelo script [`scripts/deploy.sh`](../scripts/deploy.sh), que realiza todo o ciclo de vida da homologação:
 
 ```bash
 bash scripts/deploy.sh

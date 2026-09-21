@@ -12,27 +12,36 @@
 # `!override` substitui a lista de portas do arquivo base em vez de concatenar
 # (requer Compose >= 2.24). Sem ele, o Compose manteria as portas do arquivo base
 # publicadas em 0.0.0.0 e o override não teria efeito prático.
+#
+# `restart: unless-stopped` é a política de nuvem: se a instância reiniciar, a
+# stack volta sozinha, sem depender de alguém rodar o deploy na mão. O arquivo base
+# (desenvolvimento) fica sem política de restart de propósito.
 # =============================================================================
 
 services:
   servico-pedidos:
+    restart: unless-stopped
     ports: !override
       # Única porta pública: é a que está liberada no Security Group.
       - "0.0.0.0:8000:8000"
 
   servico-estoque:
+    restart: unless-stopped
     ports: !override
       - "127.0.0.1:50051:50051" # gRPC — usado pela suíte de integração na máquina
       - "127.0.0.1:8002:8002" # health do estoque — diagnóstico
 
   postgres:
+    restart: unless-stopped
     ports: !override
       - "127.0.0.1:5432:5432"
 
   redis:
+    restart: unless-stopped
     ports: !override
       - "127.0.0.1:6379:6379"
 
   localstack:
+    restart: unless-stopped
     ports: !override
       - "127.0.0.1:4566:4566"
