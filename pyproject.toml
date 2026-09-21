@@ -1,0 +1,33 @@
+# =============================================================================
+# Configuração de ferramentas — CaixaNaMão (monorepo de microsserviços Python)
+#
+# O objetivo é tornar o lint reprodutível: o resultado não pode depender dos
+# defaults da versão do ruff instalada no momento.
+#   ruff check servico-estoque servico-pedidos servico-autenticacao
+# =============================================================================
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+# Stubs gerados pelo protoc em build time (gitignored): não são código-fonte e
+# não devem ser lintados (o ruff 0.16 não os exclui pelo .gitignore).
+extend-exclude = ["**/estoque_pb2.py", "**/estoque_pb2_grpc.py"]
+
+[tool.ruff.lint.isort]
+# Sem isto o ruff trata `app`/`tests` como third-party e ordena fora do padrão do projeto.
+known-first-party = ["app", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E4",  # imports malformados
+    "E7",  # statements inválidos
+    "E9",  # erros de runtime (ex.: bare except)
+    "F",   # pyflakes (variáveis/imports não usados, nomes indefinidos)
+    "W",   # avisos de estilo
+    "I",   # ordenação de imports (isort)
+    "B",   # bugbear (armadilhas comuns)
+]
+ignore = [
+    # Delegação explícita: o projeto usa `from __future__ import annotations`
+    "UP007",
+]

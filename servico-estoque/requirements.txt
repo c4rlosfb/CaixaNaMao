@@ -1,6 +1,13 @@
+# =============================================================================
+# Dependências de RUNTIME do servico-estoque (imagem final).
+# Dependências de desenvolvimento/teste ficam em requirements-dev.txt.
+# =============================================================================
+
 # --- Servidor gRPC ---
 grpcio==1.66.1
-grpcio-tools==1.66.1
+# Runtime do protobuf exigido pelos stubs gerados por grpcio-tools (o stub usa
+# google.protobuf.runtime_version). Sem ele o import de estoque_pb2 falha.
+protobuf==5.29.6
 
 # --- Health check HTTP (FastAPI) ---
 fastapi==0.115.0
@@ -9,7 +16,7 @@ uvicorn[standard]==0.30.6
 # --- Banco de dados ---
 sqlalchemy==2.0.35
 alembic==1.13.3
-psycopg2-binary==2.9.9
+asyncpg==0.29.0          # driver usado pelo runtime E pelo Alembic (env.py usa engine async)
 
 # --- Distributed lock (Redis) ---
 redis==5.1.0
