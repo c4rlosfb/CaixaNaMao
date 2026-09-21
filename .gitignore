@@ -5,6 +5,7 @@
 # --- Python ---
 __pycache__/
 *.py[cod]
+*$py.class
 *.pyo
 *.pyd
 *.egg
