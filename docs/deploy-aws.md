@@ -45,12 +45,13 @@ O `docker-compose.homolog.yml` faz uso da diretiva `!override` (disponível no D
 
 ## 3. Provisionamento da Instância na AWS (EC2)
 
-### 3.1 Especificação Recomendada
+### 3.1 Especificação da Instância
+* **Ambiente:** AWS Academy / Free Tier
 * **Região:** `us-east-1` (N. Virginia) ou `sa-east-1` (São Paulo).
 * **Sistema Operacional (AMI):** `Ubuntu Server 24.04 LTS` ou `22.04 LTS` (x86_64).
-* **Tipo de Instância:**
-  * **Recomendado:** `t3.small` (2 vCPUs, 2 GB RAM).
-  * **Alternativa Free Tier:** `t2.micro` (1 vCPU, 1 GB RAM) — *exige a configuração de memória Swap de pelo menos 2 GB durante o build dos containers para evitar que o processo seja morto por falta de memória (OOM).*
+* **Tipo de Instância:** `t3.micro` (2 vCPUs, 1 GB RAM — padrão obrigatório do AWS Academy).
+  > [!WARNING]
+  > Devido à restrição física de 1 GB de RAM da `t3.micro`, subir PostgreSQL, Redis e APIs juntos sem paginação de memória causará **OOM (Out of Memory) Killer**, derrubando o banco de dados. A criação de 2 GB de memória Swap é **estritamente obrigatória** antes de executar o deploy.
 * **Armazenamento:** Mínimo de 16 GB SSD gp3.
 
 ### 3.2 Regras de Firewall (Security Group)
@@ -75,21 +76,23 @@ chmod 400 caixanamao-key.pem
 ssh -i "caixanamao-key.pem" ubuntu@<IP-PUBLICO-DA-EC2>
 ```
 
-### 4.2 Configuração de Swap (Obrigatório caso use `t2.micro`)
-```bash
-sudo fallocate -l 2G /swapfile
-sudo chmod 600 /swapfile
-sudo mkswap /swapfile
-sudo swapon /swapfile
-echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
-```
-
-### 4.3 Instalação dos Pré-requisitos (Docker e Docker Compose v2)
+### 4.2 Instalação dos Pré-requisitos (Docker e Docker Compose v2)
 ```bash
 sudo apt-get update && sudo apt-get install -y docker.io docker-compose-v2 git curl
 sudo usermod -aG docker ubuntu
 ```
 *(Efetue logout com `exit` e reconecte via SSH para ativar as permissões de grupo do Docker sem necessidade de `sudo`).*
+
+### 4.3 Criação Obrigatória de Swap (2GB)
+Logo após a instalação das dependências e **antes** de rodar o deploy, ative o Swap de 2 GB para evitar o OOM Killer na `t3.micro`:
+```bash
+# Criação de Swap de 2GB para evitar OOM Killer na t3.micro
+sudo fallocate -l 2G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+```
+*(Opcional para persistir após reboot: `echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab`)*
 
 ### 4.4 Clonagem do Repositório e Checkout
 ```bash
