@@ -54,6 +54,14 @@ O `docker-compose.homolog.yml` faz uso da diretiva `!override` (disponível no D
   > Devido à restrição física de 1 GB de RAM da `t3.micro`, subir PostgreSQL, Redis e APIs juntos sem paginação de memória causará **OOM (Out of Memory) Killer**, derrubando o banco de dados. A criação de 2 GB de memória Swap é **estritamente obrigatória** antes de executar o deploy.
 * **Armazenamento:** Mínimo de 16 GB SSD gp3.
 
+> [!IMPORTANT]
+> **Aviso importante — o ambiente é efêmero (AWS Academy Sandbox).**
+> O laboratório opera em modo *sandbox*: **a instância EC2 é destruída ao final de cada sessão**, não apenas parada. Consequências práticas para quem for testar:
+> - o **IP público muda a cada novo provisionamento** — nenhum endereço visto em prints, no corpo de PRs ou em mensagens da equipe deve ser tratado como fixo;
+> - **sempre confira o novo IP no painel da AWS** (EC2 → Instâncias → *Public IPv4 address*) **antes** de rodar o `curl`, abrir o Swagger ou mexer no Security Group;
+> - o deploy é refeito do zero a cada sessão: instância, Security Group, Swap (§4.3) e `bash scripts/deploy.sh`;
+> - se precisar de um endereço estável durante a apresentação, provisione a instância com antecedência e mantenha a sessão aberta — ou associe um **Elastic IP**, quando a conta do laboratório permitir.
+
 ### 3.2 Regras de Firewall (Security Group)
 Crie um Security Group denominado `caixanamao-homolog-sg` contendo as seguintes regras de entrada (*Inbound Rules*):
 
@@ -171,4 +179,7 @@ Para evitar consumo desnecessário de horas ou créditos de nuvem após a valida
    ```bash
    bash scripts/deploy.sh --down
    ```
-2. No Console AWS EC2, selecione a instância e clique em **Estado da instância $\rightarrow$ Interromper instância (Stop Instance)**. Quando for necessário apresentar a demonstração na Sprint 5, basta iniciá-la novamente.
+2. No Console AWS EC2, encerre a instância conforme a política do laboratório.
+
+> [!WARNING]
+> No **AWS Academy Sandbox** a instância é **destruída ao fim da sessão** (não fica parada esperando a próxima). Ao reabrir o laboratório, o provisionamento é feito de novo — instância, Security Group, Swap §4.3 e deploy — e o **IP público será outro**: confira-o no painel antes de qualquer teste (ver o aviso importante na §3.1).
