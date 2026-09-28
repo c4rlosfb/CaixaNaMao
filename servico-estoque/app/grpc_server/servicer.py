@@ -33,7 +33,6 @@ from app.services.estoque_service import (
     StatusLiberacao,
     StatusReserva,
 )
-from app.telemetry import get_request_id
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +69,7 @@ def criar_servicer(
             item_id = await _uuid_valido(request.item_id, "item_id", context)
             pedido_id = await _uuid_valido(request.pedido_id, "pedido_id", context)
             request_uuid = await _uuid_valido(
-                request.request_uuid or get_request_id() or str(uuid.uuid4()), "request_uuid", context
+                request.request_uuid or str(uuid.uuid4()), "request_uuid", context
             )
             if request.quantidade <= 0:
                 await context.abort(
@@ -109,13 +108,11 @@ def criar_servicer(
 
             async with session_factory() as session:
                 servico = EstoqueService(session, lock_manager, publisher)
-                req_id_str = get_request_id()
-                req_uuid = uuid.UUID(req_id_str) if req_id_str else uuid.uuid4()
                 resultado: ResultadoLiberacao = await servico.liberar(
                     item_id=item_id,
                     quantidade=request.quantidade,
                     pedido_id=pedido_id,
-                    request_uuid=req_uuid,
+                    request_uuid=uuid.uuid4(),  # token exclusivo por operação (ADR-004)
                 )
 
             if resultado.status is StatusLiberacao.QUANTIDADE_INVALIDA:

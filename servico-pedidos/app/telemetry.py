@@ -58,15 +58,6 @@ def get_request_id() -> str | None:
     return _request_id_ctx.get()
 
 
-def set_correlation_id(valor: str | None) -> None:
-    """Define o correlation_id no contexto assíncrono atual."""
-    _correlation_id_ctx.set(valor)
-
-
-def set_request_id(valor: str | None) -> None:
-    """Define o request_id no contexto assíncrono atual."""
-    _request_id_ctx.set(valor)
-
 
 @contextmanager
 def correlation_scope(
