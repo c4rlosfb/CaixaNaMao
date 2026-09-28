@@ -18,6 +18,8 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.telemetry import CorrelationMiddleware
+
 logger = logging.getLogger(__name__)
 
 
@@ -33,6 +35,7 @@ def criar_app_health(
         docs_url=None,
         redoc_url=None,
     )
+    app.add_middleware(CorrelationMiddleware)
 
     @app.get("/health", tags=["health"], summary="Liveness probe")
     async def health() -> dict[str, str]:

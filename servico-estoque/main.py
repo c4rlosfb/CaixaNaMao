@@ -26,6 +26,7 @@ from app.db import SessionFactory, engine
 from app.grpc_server.server import montar_servidor_grpc
 from app.health import criar_app_health
 from app.locking.redis_lock import RedisLockManager
+from app.telemetry import configurar_logging
 
 logger = logging.getLogger(__name__)
 
@@ -38,10 +39,7 @@ class _ServidorHealth(uvicorn.Server):
 
 
 def _configurar_logging() -> None:
-    logging.basicConfig(
-        level=settings.log_level.upper(),
-        format="%(levelname)s | %(name)s | %(message)s",
-    )
+    configurar_logging(settings.log_level)
 
 
 async def _executar() -> None:

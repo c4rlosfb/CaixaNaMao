@@ -31,6 +31,7 @@ from enum import Enum
 import grpc
 
 from app.config import settings
+from app.telemetry import obter_metadados_grpc
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +103,8 @@ class EstoqueClient:
                 pedido_id=str(pedido_id),
                 request_uuid=str(request_uuid),
             )
-            response = await self._stub.CheckAndReserve(request, timeout=5.0)
+            metadata = obter_metadados_grpc()
+            response = await self._stub.CheckAndReserve(request, timeout=5.0, metadata=metadata)
             return ReservaResult(
                 sucesso=response.sucesso,
                 status=StatusReserva(response.status),
@@ -132,7 +134,8 @@ class EstoqueClient:
                 quantidade=quantidade,
                 pedido_id=str(pedido_id),
             )
-            response = await self._stub.ReleaseReserva(request, timeout=5.0)
+            metadata = obter_metadados_grpc()
+            response = await self._stub.ReleaseReserva(request, timeout=5.0, metadata=metadata)
             return ReleaseResult(sucesso=response.sucesso, mensagem=response.mensagem)
         except grpc.aio.AioRpcError as exc:
             logger.error("gRPC ReleaseReserva falhou: %s", exc)

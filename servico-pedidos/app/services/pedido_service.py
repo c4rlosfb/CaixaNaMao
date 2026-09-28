@@ -32,6 +32,7 @@ from app.models.enums import StatusPedido
 from app.models.pedido import Pedido
 from app.repositories.pedido_repository import PedidoRepository
 from app.schemas.pedido import PedidoCreate
+from app.telemetry import get_correlation_id, get_request_id
 
 logger = logging.getLogger(__name__)
 
@@ -215,6 +216,8 @@ class PedidoService:
                 }
                 for i in payload.itens
             ],
+            correlation_id=get_correlation_id(),
+            request_id=get_request_id(),
         )
 
         logger.info("Pedido criado com sucesso: id=%s vendedor=%s", pedido.id, vendedor_id)
