@@ -300,8 +300,8 @@ transações e requisições distribuídas em todos os microsserviços:
 2. **Propagação na Borda REST (HTTP):**
    - Middleware ASGI `CorrelationMiddleware` em `servico-pedidos` (e health do `servico-estoque`);
    - Captura `X-Correlation-ID` do cliente se enviado (validando se é um UUID válido); caso
-     ausente ou malformado, tenta adotar `X-Request-ID` como correlation id; se nenhum dos dois
-     estiver presente ou for válido, gera um novo UUIDv4 aleatório;
+     ausente, tenta adotar `X-Request-ID` como correlation id (se for um UUID válido); se o
+     valor escolhido estiver malformado, ou nenhum estiver presente, gera um novo UUIDv4 aleatório;
    - Gera (ou preserva, se válido) um `X-Request-ID` para o salto e o ecoa na resposta;
    - Injeta ambos os cabeçalhos nas respostas HTTP e expõe via CORS (`expose_headers`).
 
