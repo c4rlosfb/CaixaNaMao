@@ -12,9 +12,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.clients.estoque_client import EstoqueClient, get_estoque_client
 from app.db import dispose_engine
 from app.routers import pedidos
+from app.telemetry import CorrelationMiddleware, configurar_logging
 
-logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(name)s | %(message)s")
+configurar_logging()
 logger = logging.getLogger(__name__)
+
 
 
 @asynccontextmanager
@@ -41,11 +43,19 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.add_middleware(CorrelationMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # restringir em produção
     allow_methods=["GET", "POST", "PATCH"],
-    allow_headers=["Authorization", "Content-Type"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "Idempotency-Key",
+        "X-Correlation-ID",
+        "X-Request-ID",
+    ],
+    expose_headers=["X-Correlation-ID", "X-Request-ID"],
 )
 
 app.include_router(pedidos.router)

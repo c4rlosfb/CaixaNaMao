@@ -12,6 +12,7 @@ from app.clients.event_publisher import EventPublisher
 from app.grpc_server.servicer import criar_servicer
 from app.grpc_server.stubs import carregar_stubs
 from app.locking.redis_lock import RedisLockManager
+from app.telemetry import CorrelationServerInterceptor
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,7 @@ def montar_servidor_grpc(
     servidor = grpc.aio.server(
         maximum_concurrent_rpcs=max_concurrent_rpcs,
         options=OPCOES_PADRAO,
+        interceptors=[CorrelationServerInterceptor()],
     )
     servicer = criar_servicer(
         session_factory=session_factory, lock_manager=lock_manager, publisher=publisher

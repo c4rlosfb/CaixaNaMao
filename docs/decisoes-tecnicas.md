@@ -271,3 +271,85 @@ a carga operacional da equipe nas Sprints iniciais.
 - **Apache Kafka:** Replay e alta durabilidade são atraentes, mas exige configuração de cluster Zookeeper/KRaft, aumentando a complexidade operacional além do necessário para Sprint 1.
 - **RabbitMQ:** Mais simples que Kafka, mas ainda requer um container adicional e configuração de exchanges/bindings; sem replay.
 - **Chamadas REST síncronas para notificar subsistemas:** Cria acoplamento temporal — se o subsistema de notificação estiver indisponível, o pedido falha. Inaceitável.
+
+---
+
+## ADR-006: Padrão UUID para Rastreio Distribuído de Transações e Logs
+
+**Status:** Aceito
+
+### Contexto
+
+Com a execução concorrente de múltiplos terminais móveis e a interação entre microsserviços
+via REST (`servico-pedidos`), gRPC (`servico-estoque`) e mensageria assíncrona (`AWS SQS`),
+rastrear o fluxo de uma transação distribuída nos logs é desafiador. Quando ocorre uma falha
+na reserva, timeout ou compensação, correlacionar os eventos emitidos por diferentes
+componentes exige um identificador único transversal que perpasse todas as camadas de
+transporte sem poluir os modelos de domínio.
+
+### Decisão
+
+Adotar o padrão de identificação **UUID (RFC 4122 v4)** como rastreador unificado de
+transações e requisições distribuídas em todos os microsserviços:
+
+1. **Pares de Rastreio (`correlation_id` e `request_id`):**
+   - `correlation_id`: identifica a unidade lógica da transação de negócio de ponta a ponta
+     através de fronteiras de serviço (HTTP → gRPC → SQS);
+   - `request_id`: identifica a requisição individual (salto de rede) em cada microsserviço.
+
+2. **Propagação na Borda REST (HTTP):**
+   - Middleware ASGI `CorrelationMiddleware` em `servico-pedidos` (e health do `servico-estoque`);
+   - Captura `X-Correlation-ID` do cliente se enviado (validando se é um UUID válido); caso
+     ausente, tenta adotar `X-Request-ID` como correlation id (se for um UUID válido); se o
+     valor escolhido estiver malformado, ou nenhum estiver presente, gera um novo UUIDv4 aleatório;
+   - Gera (ou preserva, se válido) um `X-Request-ID` para o salto e o ecoa na resposta;
+   - Injeta ambos os cabeçalhos nas respostas HTTP e expõe via CORS (`expose_headers`).
+
+3. **Propagação Interna Síncrona (gRPC):**
+   - `EstoqueClient` em `servico-pedidos` propaga `x-correlation-id` e `x-request-id` como
+     metadados de invocação HTTP/2;
+   - `CorrelationServerInterceptor` em `servico-estoque` intercepta chamadas RPC, popula as
+     `contextvars` da corrotina correspondente e devolve os mesmos identificadores em
+     `trailing_metadata`.
+
+4. **Propagação Assíncrona (AWS SQS):**
+   - Produtores SQS incluem `correlation_id` e `request_id` no corpo do payload JSON do
+     evento (`PedidoCriado`, `EstoqueAtualizado`) e nos `MessageAttributes` da mensagem
+     (permitindo filtragem sem deserialização).
+
+5. **Logs Contextualizados e Unificados:**
+   - Variáveis assíncronas `contextvars.ContextVar` isoladas por corrotina;
+   - `CorrelationLogFilter` injeta `correlation_id` e `request_id` no `LogRecord` de todos os
+     loggers da aplicação;
+   - Formato padrão unificado:
+     `%(levelname)s | %(name)s | [corr=%(correlation_id)s req=%(request_id)s] | %(message)s`.
+
+### Justificativa
+
+| Critério | UUID (ContextVars + Headers) | OpenTelemetry / Jaeger SDK | Parâmetro explícito em métodos |
+|---|---|---|---|
+| **Overhead de CPU/RAM** | ✅ Desprezível (< 10 µs) | ⚠ Elevado em t3.micro | ✅ Baixo |
+| **Complexidade operacional** | ✅ Zero infra extra | ❌ Exige collector/daemon | ✅ Zero infra |
+| **Acoplamento de código** | ✅ Transparente (middleware/interceptor) | ⚠ Alto (instrumentação pesada) | ❌ Invasivo em todo método |
+| **Integração multi-transporte**| ✅ HTTP, gRPC e SQS unificados | ⚠ Requer plugins específicos | ❌ Manual em cada payload |
+| **Compatibilidade de logs** | ✅ Qualquer agregador (CloudWatch/Loki) | ✅ Padrão OpenTelemetry | ⚠ Inconsistente |
+
+### Consequências
+
+- **Positivas:** Logs agregados podem ser filtrados instantaneamente por `corr=<uuid>` para
+  reconstruir toda a jornada do pedido (HTTP → gRPC → Banco → SQS); diagnóstico de
+  falhas concorrentes simplificado; zero alteração estrutural no contrato `.proto`.
+- **Negativas:** Requer disciplina na criação de threads ou tarefas em background para não
+  perder o contexto (mitigado pelo uso de `asyncio.to_thread` e passagem explícita quando
+  necessário).
+- **Validação:** Cobertura de testes unitários e de integração validando round-trip de
+  headers HTTP, trailing metadata gRPC e atributos SQS.
+
+### Alternativas Rejeitadas
+
+- **Integração com OpenTelemetry / Jaeger:** Muito poderosa, mas adiciona overhead de
+  dependências pesadas e consumo de memória que violariam a restrição de execução da
+  instância AWS `t3.micro` (1 GB RAM com swap) já estabelecida para o projeto.
+- **IDs sequenciais / timestamps:** Inviáveis para sistemas distribuídos com múltiplos
+  nós independentes sem um serviço central de coordenação (risco de colisão).
+

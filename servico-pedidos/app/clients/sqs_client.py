@@ -24,6 +24,7 @@ from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 
 from app.config import settings
+from app.telemetry import get_correlation_id, get_request_id
 
 logger = logging.getLogger(__name__)
 
@@ -63,16 +64,22 @@ class SQSClient:
         vendedor_id: uuid.UUID,
         total: str,
         itens: list[dict],
+        correlation_id: str | None = None,
+        request_id: str | None = None,
     ) -> bool:
-        """Publica o evento PedidoCriado.
+        """Publica o evento PedidoCriado com metadados de rastreio distribuído.
 
         Best-effort: falha é logada e devolvida como `False` — nunca propaga para
         o cliente (a política está em ADR-005 e na matriz de riscos). Chamar
         **após** o commit do pedido.
         """
+        corr_id = correlation_id or get_correlation_id() or str(uuid.uuid4())
+        req_id = request_id or get_request_id() or str(uuid.uuid4())
         event = {
             "event_id": str(uuid.uuid4()),  # idempotência no consumidor
             "event_type": "PedidoCriado",
+            "correlation_id": corr_id,
+            "request_id": req_id,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "payload": {
                 "pedido_id": str(pedido_id),
@@ -85,8 +92,18 @@ class SQSClient:
             self._sqs.send_message(
                 QueueUrl=self._get_queue_url(),
                 MessageBody=json.dumps(event),
+                MessageAttributes={
+                    "correlation_id": {
+                        "DataType": "String",
+                        "StringValue": corr_id,
+                    },
+                    "request_id": {
+                        "DataType": "String",
+                        "StringValue": req_id,
+                    },
+                },
             )
-            logger.info("Evento PedidoCriado publicado: pedido_id=%s", pedido_id)
+            logger.info("Evento PedidoCriado publicado: pedido_id=%s [corr=%s]", pedido_id, corr_id)
             return True
         except (BotoCoreError, ClientError) as exc:
             logger.error(

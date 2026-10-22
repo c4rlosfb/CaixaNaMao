@@ -248,6 +248,31 @@ movimentacoes (id UUID PK, item_id UUID FK, tipo TEXT,
 | `caixanamao-pedidos-criados` | servico-pedidos | Notificações, Analytics |
 | `caixanamao-estoque-atualizado` | servico-estoque | Relatórios, Alertas de reposição |
 
+### 4.4 Rastreabilidade Distribuída e Padrão UUID (ADR-006)
+
+Para viabilizar a rastreabilidade transversal entre serviços e simplificar a correlação
+em logs distribuídos, o sistema adota um padrão de identificação baseado em UUID (RFC 4122 v4):
+
+1. **Par de Identificadores:**
+   - `correlation_id`: identifica o ciclo de vida completo da transação distribuída
+     (compartilhado entre cliente, `servico-pedidos`, `servico-estoque` e filas SQS);
+   - `request_id`: identifica a requisição ou salto específico no nó em execução.
+
+2. **Propagação Multi-Protocolo:**
+   - **HTTP/REST**: cabeçalhos `X-Correlation-ID` e `X-Request-ID` recebidos, validados e
+     devolvidos nas respostas (com exposição no CORS via `expose_headers`);
+   - **gRPC**: propagação automática como metadados HTTP/2 (`x-correlation-id` e `x-request-id`)
+     no cliente (`EstoqueClient`) e captura no servidor via `CorrelationServerInterceptor`;
+   - **AWS SQS**: injeção de `correlation_id` e `request_id` tanto no envelope JSON quanto nos
+     `MessageAttributes` das mensagens para roteamento/auditoria rápida.
+
+3. **Formato Unificado de Logs:**
+   Todas as mensagens emitidas nos microsserviços passam por `CorrelationLogFilter`, sendo
+   enriquecidas com os identificadores do contexto assíncrono:
+   ```text
+   %(levelname)s | %(name)s | [corr=%(correlation_id)s req=%(request_id)s] | %(message)s
+   ```
+
 ---
 
 ## 5. Modelo de Dados e Persistência

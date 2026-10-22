@@ -27,6 +27,7 @@ from app.locking.redis_lock import LockIndisponivelError, RedisLockManager
 from app.models.enums import TipoMovimentacao
 from app.models.item import Item
 from app.repositories.estoque_repository import EstoqueRepository
+from app.telemetry import get_correlation_id, get_request_id
 
 logger = logging.getLogger(__name__)
 
@@ -392,5 +393,7 @@ class EstoqueService:
             quantidade=quantidade,
             quantidade_disponivel=resumo.quantidade_disponivel,
             quantidade_reservada=resumo.quantidade_reservada,
+            correlation_id=get_correlation_id(),
+            request_id=get_request_id(),
         )
         await self._publisher.publicar_estoque_atualizado(evento=evento)

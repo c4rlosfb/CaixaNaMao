@@ -112,7 +112,7 @@ def criar_servicer(
                     item_id=item_id,
                     quantidade=request.quantidade,
                     pedido_id=pedido_id,
-                    request_uuid=uuid.uuid4(),
+                    request_uuid=uuid.uuid4(),  # token exclusivo por operação (ADR-004)
                 )
 
             if resultado.status is StatusLiberacao.QUANTIDADE_INVALIDA:

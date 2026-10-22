@@ -16,6 +16,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Protocol, runtime_checkable
 
+from app.telemetry import get_correlation_id, get_request_id
+
 logger = logging.getLogger(__name__)
 
 
@@ -97,8 +99,21 @@ class SQSEventPublisher:
 
     def _enviar_bloqueante(self, evento: dict[str, object]) -> None:  # pragma: no cover - exige AWS
         try:
+            corr_id = str(evento.get("correlation_id") or get_correlation_id() or uuid.uuid4())
+            req_id = str(evento.get("request_id") or get_request_id() or uuid.uuid4())
             self._obter_cliente().send_message(
-                QueueUrl=self._obter_url_fila(), MessageBody=json.dumps(evento, default=str)
+                QueueUrl=self._obter_url_fila(),
+                MessageBody=json.dumps(evento, default=str),
+                MessageAttributes={
+                    "correlation_id": {
+                        "DataType": "String",
+                        "StringValue": corr_id,
+                    },
+                    "request_id": {
+                        "DataType": "String",
+                        "StringValue": req_id,
+                    },
+                },
             )
         except Exception:
             # Cache pode estar desatualizado (fila recriada): descarta e propaga.
@@ -166,11 +181,17 @@ def novo_evento_estoque_atualizado(
     quantidade: int,
     quantidade_disponivel: int,
     quantidade_reservada: int,
+    correlation_id: str | None = None,
+    request_id: str | None = None,
 ) -> dict[str, object]:
-    """Monta o corpo do evento `EstoqueAtualizado` (ADR-005)."""
+    """Monta o corpo do evento `EstoqueAtualizado` (ADR-005 e ADR-006)."""
+    corr_id = correlation_id or get_correlation_id() or str(uuid.uuid4())
+    req_id = request_id or get_request_id() or str(uuid.uuid4())
     return {
         "event_id": str(uuid.uuid4()),
         "evento": "EstoqueAtualizado",
+        "correlation_id": corr_id,
+        "request_id": req_id,
         "tipo_movimentacao": tipo_movimentacao,
         "item_id": str(item_id),
         "pedido_id": str(pedido_id),
