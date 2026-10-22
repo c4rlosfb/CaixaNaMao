@@ -4,7 +4,7 @@
 > **Sprint:** 1  
 > **Autor:** c4rlosfb  
 > **Status:** Aprovado  
-> **Última atualização:** 2026-09-18
+> **Última atualização:** 2026-10-22
 
 ---
 
@@ -55,7 +55,8 @@ graph TB
     end
 
     subgraph Dados["Infraestrutura de Dados"]
-        PG[(PostgreSQL 16\nCluster Único)]
+        PG[(PostgreSQL 16\nPrimário)]
+        PGR[(PostgreSQL 16\nRéplica hot standby)]
         RD[(Redis 7\nDistributed Lock)]
         SQS[[AWS SQS\nFila de Eventos]]
     end
@@ -80,6 +81,7 @@ graph TB
     PDB --> PG
     EDB --> PG
     ADB --> PG
+    PG -->|WAL streaming\nslot caixanamao_replica| PGR
     PH -->|Publica evento\nPedidoCriado| SQS
     EH -->|Publica evento\nEstoqueAtualizado| SQS
 ```
@@ -277,22 +279,33 @@ em logs distribuídos, o sistema adota um padrão de identificação baseado em 
 
 ## 5. Modelo de Dados e Persistência
 
-### 5.1 PostgreSQL — Cluster Único, Databases Lógicos Isolados
+### 5.1 PostgreSQL — Cluster Único com Primário e Réplica Hot Standby
 
-Um único servidor PostgreSQL 16 hospeda três databases lógicos independentes.
-Cada microsserviço conecta-se **somente ao seu próprio database** via string de conexão dedicada e usuário com permissões restritas (GRANT mínimo).
+Um cluster PostgreSQL 16 com **primário e réplica física (hot standby)** hospeda os três
+databases lógicos independentes. Cada microsserviço conecta-se **somente ao seu próprio
+database** no primário, via string de conexão dedicada e usuário com permissões restritas
+(GRANT mínimo).
 
 ```
 postgresql://
   pedidos_user:***@postgres:5432/pedidos_db       → servico-pedidos
   estoque_user:***@postgres:5432/estoque_db       → servico-estoque
   auth_user:***@postgres:5432/autenticacao_db     → servico-autenticacao
+
+  postgres-replica:5432                           → cópia física (somente leitura)
 ```
 
 Essa abordagem:
 - Mantém **isolamento lógico** exigido pelo padrão de microsserviços
 - Poupa a configuração de 3 servidores distintos (Sprint 1)
-- Facilita a **replicação física futura** do cluster único (Sprint 3+)
+- Entrega a **replicação física** planejada para a Sprint 3: streaming assíncrono com slot
+  físico, `hot_standby_feedback` e promoção manual (ADR-007)
+- Mantém **todas as escritas no primário**, preservando a consistência forte do estoque;
+  a réplica é read-only e serve leitura/diagnóstico, sem roteamento de leitura pelos
+  serviços nesta Sprint
+
+> Detalhes de configuração, validação e runbook de promoção/re-clone:
+> [`docs/replicacao-postgres.md`](replicacao-postgres.md).
 
 ### 5.2 Redis 7 — Distributed Lock
 
@@ -336,11 +349,13 @@ Nenhuma dependência de runtime é compartilhada entre containers.
 ### 7.2 docker-compose (ambiente local / desenvolvimento)
 
 ```yaml
-# Serviços de infraestrutura (já configurados):
-postgres:16      → porta 5432
-redis:7          → porta 6379
+# Serviços de infraestrutura:
+postgres:16          → porta 5432 (primário)
+postgres-replica     → porta 5433 (hot standby; imagem postgres:16)
+replicacao-init      → one-shot: cria papel replicator + slot físico
+redis:7              → porta 6379
 
-# Microsserviços (a configurar nas Sprints 2+):
+# Microsserviços:
 servico-autenticacao  → porta 8001
 servico-pedidos       → porta 8000
 servico-estoque       → portas 8002 (HTTP) e 50051 (gRPC)
@@ -357,7 +372,9 @@ Variáveis sensíveis (senhas, segredos JWT) são injetadas via arquivo `.env`
 |---|---|---|---|
 | Lock Redis expirar antes da transação terminar | Baixa | Alto | TTL conservador (5s); monitorar latência do PostgreSQL |
 | Partição de rede entre Pedidos e Estoque | Média | Alto | Circuit Breaker (Sprint 4) + retry com backoff exponencial |
-| Gargalo no único cluster PostgreSQL | Baixa (Sprint 1) | Médio | Replicação de leitura planejada para Sprint 3 |
+| Gargalo no primário PostgreSQL | Baixa | Médio | Réplica hot standby para leitura/continuidade (ADR-007); escritas seguem no primário |
+| Perda do primário PostgreSQL | Baixa | Alto | Promoção manual da réplica documentada em `docs/replicacao-postgres.md` §7.1; sem failover automático |
+| Réplica defasada / RPO > 0 | Média | Médio | Streaming assíncrono monitorado por `pg_stat_replication`; escritas críticas sempre no primário |
 | SQS indisponível | Baixa | Baixo | Eventos são não-críticos; sistema continua operando sem eles |
 | Divergência de schema entre serviços | Média | Médio | Migrations independentes por serviço (Alembic) |
 

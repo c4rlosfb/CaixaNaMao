@@ -36,6 +36,17 @@ services:
     ports: !override
       - "127.0.0.1:5432:5432"
 
+  # Réplica hot standby (Sprint 3 / issue #11). Só escuta no loopback da
+  # instância: é para leitura/diagnóstico e para uma eventual promoção manual.
+  postgres-replica:
+    restart: unless-stopped
+    ports: !override
+      - "127.0.0.1:5433:5432"
+
+  # One-shot: sempre roda no `up` e termina; não deve reiniciar em loop.
+  replicacao-init:
+    restart: "no"
+
   redis:
     restart: unless-stopped
     ports: !override

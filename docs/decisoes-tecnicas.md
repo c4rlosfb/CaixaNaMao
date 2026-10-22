@@ -353,3 +353,84 @@ transações e requisições distribuídas em todos os microsserviços:
 - **IDs sequenciais / timestamps:** Inviáveis para sistemas distribuídos com múltiplos
   nós independentes sem um serviço central de coordenação (risco de colisão).
 
+---
+
+## ADR-007: Replicação Streaming Assíncrona com Hot Standby e Promoção Manual
+
+**Status:** Aceito
+**Sprint:** 3 — issue #11
+
+### Contexto
+
+O ADR-003 concentra os três databases lógicos em um único cluster PostgreSQL 16. A decisão
+reduziu o custo operacional, mas deixou explícito o trade-off: o cluster é **ponto único de
+falha** para todos os serviços. A Sprint 3 exige replicação master/slave para aumentar a
+disponibilidade e preservar a consistência dos dados.
+
+O ambiente de referência é uma instância `t3.micro` (1 GB de RAM, com swap) no AWS Academy
+Sandbox, que é destruída ao fim de cada sessão. Qualquer solução precisa ser reproduzível via
+Docker Compose, não pode depender de infraestrutura gerenciada e deve caber nessa restrição.
+
+### Decisão
+
+Adotar **replicação física por streaming** entre dois containers da mesma imagem
+`postgres:16`:
+
+- **`postgres`** — primário; recebe todas as escritas; `wal_level=replica`,
+  `max_wal_senders=10`, `max_replication_slots=10`, `wal_keep_size=512MB`,
+  `max_slot_wal_keep_size=2GB`, `hot_standby=on`.
+- **`postgres-replica`** — hot standby em recovery contínua; `pg_basebackup` inicial com
+  **slot físico** `caixanamao_replica`; `hot_standby_feedback=on`; somente leitura.
+- **`replicacao-init`** — serviço one-shot idempotente que cria o papel `replicator`
+  (`LOGIN REPLICATION`, senha em `REPLICATION_PASSWORD`) e o slot físico. Roda a cada
+  `docker compose up` e torna o setup reproduzível em volumes novos **e antigos**.
+- **Autenticação** — apenas SCRAM-SHA-256; a regra de `pg_hba` para a rede do Compose é
+  garantida pelo entrypoint do primário, porque `pg_hba.conf` não é editável por SQL.
+
+A replicação é **assíncrona** e o failover é **manual**. Os microsserviços continuam
+apontando para o primário — nenhuma string de conexão mudou nesta issue.
+
+### Justificativa
+
+| Critério | Streaming assíncrona (escolhida) | Streaming síncrona | Replicação lógica |
+|---|---|---|---|
+| **Complexidade operacional** | ✅ Baixa (2 containers, 1 imagem) | ⚠ Média (gerenciar quórum de standby) | ⚠ Alta (publicações por tabela, schema não replicado) |
+| **Disponibilidade de escrita** | ✅ `COMMIT` não depende da réplica | ❌ Réplica fora ⇒ escrita bloqueia/falha | ✅ Igual à assíncrona |
+| **RPO** | ⚠ > 0 (janela de WAL não enviado) | ✅ 0 (confirmação no standby) | ⚠ > 0 |
+| **Consistência da cópia** | ✅ Física, bloco a bloco | ✅ Física | ⚠ Só tabelas publicadas |
+| **Cabe em `t3.micro`** | ✅ ~2 processos PostgreSQL | ✅ Idem, porém mais sensível a latência | ⚠ Overhead de decodificação |
+| **Pronto para failover** | ✅ Basta promover | ✅ Basta promover | ⚠ Exige repontar assinaturas/consumidores |
+
+A consistência forte do estoque (ADR-004) é preservada porque **toda escrita continua no
+primário**: as transações `SELECT ... FOR UPDATE`/`UPDATE` condicional e o lock Redis não
+mudam de lugar. A réplica é uma cópia para leitura e continuidade, não um segundo primário.
+
+### Consequências
+
+- **Positivas:** elimina a dependência de um único processo PostgreSQL para leitura e
+  diagnóstico; fornece standby atualizado para promoção manual; setup 100 % Docker Compose,
+  reproduzível em qualquer máquina; validação automatizada em
+  `scripts/validar_replicacao.sh` (7 verificações, incluindo escrita replicada e réplica
+  read-only).
+- **Negativas:** RPO maior que zero (replicação assíncrona); RTO depende de operação manual;
+  WAL pode ocupar até 2 GB no primário se a réplica ficar parada; re-clone necessário se o
+  slot for invalidado; a réplica não é usada pelos serviços nesta issue, então não há ganho
+  de throughput de leitura na aplicação ainda.
+- **Cuidados:** não iniciar o primário antigo após uma promoção (split-brain); replicação
+  física **não substitui backup**; atualizar `REPLICATION_PASSWORD` em `.env` (o
+  `deploy.sh` já gera um segredo aleatório ao criar o arquivo).
+
+### Alternativas Rejeitadas
+
+- **Replicação síncrona como default:** daria RPO zero, mas acopla a disponibilidade de
+  escrita à réplica. Com a réplica fora do ar, os `COMMIT` do primário bloqueiam ou falham
+  — inaceitável para a stack de desenvolvimento, que deve subir só com o primário, e não
+  resolve o ponto de falha, apenas o desloca. Fica registrada como evolução para produção.
+- **Patroni/repmgr (failover automático):** exigiria consenso, quórum e um serviço extra de
+  coordenação; complexidade e consumo de memória desproporcionais à instância `t3.micro` e
+  ao escopo da Sprint 3.
+- **Replicação lógica:** replicaria apenas tabelas publicadas, exigiria gerenciar
+  publicações/assinaturas e não replicaria roles/schema; não entrega um standby pronto para
+  assumir o cluster inteiro.
+- **Serviços de banco gerenciado (RDS):** eliminariam a operação, mas contrariam o objetivo
+  didático de configurar a replicação e o requisito de rodar no sandbox sem custo.
