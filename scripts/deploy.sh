@@ -56,6 +56,7 @@ if [ ! -f .env ]; then
     gerar_segredo() { head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n'; }
     sed -i "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$(gerar_segredo)|" .env
     sed -i "s|^JWT_SECRET=.*|JWT_SECRET=$(gerar_segredo)|" .env
+    sed -i "s|^REPLICATION_PASSWORD=.*|REPLICATION_PASSWORD=$(gerar_segredo)|" .env
     echo "    .env criado (não versionado). Para trocar valores: edite .env e rode de novo."
 else
     echo "==> usando o .env existente"

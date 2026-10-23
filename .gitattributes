@@ -1,0 +1,10 @@
+# =============================================================================
+# Normalização de fim de linha
+#
+# Os entrypoints em `infra/` são montados em containers Linux e executados por
+# `/bin/bash`. Com `core.autocrlf=true` (padrão no Windows), um checkout
+# converteria esses arquivos para CRLF e o shell falharia com `$'\r': command
+# not found`. Forçar LF para *.sh garante que o ambiente funcione em qualquer
+# clone, independentemente da configuração local do Git.
+# =============================================================================
+*.sh text eol=lf

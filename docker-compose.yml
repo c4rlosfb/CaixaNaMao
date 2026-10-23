@@ -3,8 +3,32 @@ services:
   # ---------------------------------------------------------------------------
   # Infraestrutura de dados
   # ---------------------------------------------------------------------------
+  # PostgreSQL primário (master). A réplica hot standby está em
+  # `postgres-replica` e o bootstrap da replicação em `replicacao-init`.
   postgres:
     image: postgres:16
+    entrypoint: ["/bin/bash", "/usr/local/bin/primary-entrypoint.sh"]
+    command:
+      - postgres
+      # --- Replicação física (Sprint 3 / issue #11) ---------------------------
+      # wal_level=replica é pré-requisito para enviar WAL a um standby.
+      - -c
+      - wal_level=replica
+      - -c
+      - max_wal_senders=10
+      - -c
+      - max_replication_slots=10
+      # Retenção de WAL de segurança (além do slot físico): se a réplica ficar
+      # fora por um tempo, ela ainda consegue retomar sem re-clone.
+      - -c
+      - wal_keep_size=512MB
+      # Teto do WAL retido por slot: com a réplica parada por muito tempo, o
+      # primário não enche o disco — acima do teto o slot é invalidado e o
+      # re-clone é necessário (ver docs/replicacao-postgres.md).
+      - -c
+      - max_slot_wal_keep_size=2GB
+      - -c
+      - hot_standby=on
     environment:
       POSTGRES_USER:     ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD no arquivo .env (nao versionado)}
@@ -13,16 +37,89 @@ services:
       PEDIDOS_DB_PASSWORD:  ${PEDIDOS_DB_PASSWORD:-pedidos_pass}
       ESTOQUE_DB_PASSWORD:  ${ESTOQUE_DB_PASSWORD:-estoque_pass}
       AUTH_DB_PASSWORD:     ${AUTH_DB_PASSWORD:-auth_pass}
+      # Credencial do papel de replicação (consumida por replicacao-init)
+      REPLICATION_PASSWORD: ${REPLICATION_PASSWORD:-replicacao_pass}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./infra/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+      # Em volume NOVO, o pg_hba.conf só nasce depois do initdb; este hook roda
+      # em seguida e libera a conexão de replicação (ver initdb-replicacao.sh).
+      - ./infra/postgres/initdb-replicacao.sh:/docker-entrypoint-initdb.d/10-replicacao.sh:ro
+      # Ajusta o pg_hba.conf antes do servidor subir (volumes antigos inclusive).
+      - ./infra/postgres/primary-entrypoint.sh:/usr/local/bin/primary-entrypoint.sh:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      # TCP explícito: durante o initdb de um volume novo o servidor temporário
+      # escuta só no socket Unix; um `pg_isready` local passaria cedo demais e
+      # liberaria o bootstrap/replica antes de o servidor definitivo subir.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U \"$${POSTGRES_USER}\" -d postgres"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 30s
+
+  # ---------------------------------------------------------------------------
+  # Bootstrap idempotente da replicação: cria o papel `replicator` e o slot
+  # físico `caixanamao_replica` no primário. Roda a cada `docker compose up` e
+  # termina; a réplica só sobe quando ele conclui com sucesso.
+  # ---------------------------------------------------------------------------
+  replicacao-init:
+    image: postgres:16
+    entrypoint: ["/bin/bash", "/infra/bootstrap-replicacao.sh"]
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGUSER: ${POSTGRES_USER:-postgres}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD no arquivo .env (nao versionado)}
+      PGDATABASE: postgres
+      REPLICATION_PASSWORD: ${REPLICATION_PASSWORD:-replicacao_pass}
+    volumes:
+      - ./infra/replicacao/init-replicacao.sql:/infra/init-replicacao.sql:ro
+      - ./infra/replicacao/bootstrap-replicacao.sh:/infra/bootstrap-replicacao.sh:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL réplica (slave / hot standby), alimentada por streaming
+  # replication assíncrona. Somente leitura por construção (recovery).
+  # ---------------------------------------------------------------------------
+  postgres-replica:
+    image: postgres:16
+    entrypoint: ["/bin/bash", "/usr/local/bin/replica-entrypoint.sh"]
+    command: ["postgres", "-c", "listen_addresses=*"]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD no arquivo .env (nao versionado)}
+      PRIMARY_HOST: postgres
+      PRIMARY_PORT: "5432"
+      REPLICATION_USER: replicator
+      REPLICATION_PASSWORD: ${REPLICATION_PASSWORD:-replicacao_pass}
+      REPLICATION_SLOT: caixanamao_replica
+    ports:
+      # Loopback apenas: porta de diagnóstico/leitura, não exposta à rede.
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - postgres_replica_data:/var/lib/postgresql/data
+      - ./infra/postgres/replica-entrypoint.sh:/usr/local/bin/replica-entrypoint.sh:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      replicacao-init:
+        condition: service_completed_successfully
+    healthcheck:
+      # Healthy = aceita SQL E continua em recovery (é réplica, não promovida).
+      test:
+        - CMD-SHELL
+        - >-
+          pg_isready -U "$${POSTGRES_USER}" -d postgres &&
+          [ "$$(psql -U "$${POSTGRES_USER}" -d postgres -tAc 'SELECT pg_is_in_recovery()')" = "t" ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
 
   redis:
     image: redis:7-alpine
@@ -138,4 +235,5 @@ services:
 # ---------------------------------------------------------------------------
 volumes:
   postgres_data:
+  postgres_replica_data:
   localstack_data:
