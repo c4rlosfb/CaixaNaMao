@@ -7,9 +7,12 @@ Fluxo de reserva implementado exatamente como especificado em
 2. aquisição do lock distribuído `SET lock:estoque:{item_id} {request_uuid} NX EX 5`
    (falha do Redis ⇒ **fail closed** ⇒ `ESTOQUE_BLOQUEADO`);
 3. transação PostgreSQL com **UPDATE condicional atômico**
-   (`WHERE quantidade_disponivel >= :quantidade`) + linha em `movimentacoes`;
-4. liberação do lock via Lua com checagem de propriedade;
-5. publicação best-effort do evento `EstoqueAtualizado`.
+   (`WHERE quantidade_disponivel >= :quantidade`) + linha em `movimentacoes`,
+   com o lease do lock renovado por um watchdog a cada 1/3 do TTL;
+4. reconferência de posse do lock imediatamente antes do `COMMIT` — se o lease
+   foi perdido, a transação é descartada (`ESTOQUE_BLOQUEADO`);
+5. liberação do lock via Lua com checagem de propriedade;
+6. publicação best-effort do evento `EstoqueAtualizado`.
 """
 
 from __future__ import annotations
@@ -187,24 +190,36 @@ class EstoqueService:
                 "Item bloqueado por outra operação; tente novamente",
             )
 
-        # 3. Transação atômica
+        # 3. Transação atômica, com o lease do lock renovado enquanto o bloco roda:
+        #    uma transação mais longa que o TTL não deixa o lock expirar no meio.
         try:
-            item = await self._repo.reservar_atomico(item_id, quantidade)
-            if item is None:
-                await self._session.rollback()
-                if await self._repo.buscar_item(item_id) is None:
+            async with self._lock.manter_vivo(item_id, request_uuid):
+                item = await self._repo.reservar_atomico(item_id, quantidade)
+                if item is None:
+                    await self._session.rollback()
+                    if await self._repo.buscar_item(item_id) is None:
+                        return ResultadoReserva(
+                            StatusReserva.ITEM_NAO_ENCONTRADO, f"Item {item_id} não encontrado"
+                        )
                     return ResultadoReserva(
-                        StatusReserva.ITEM_NAO_ENCONTRADO, f"Item {item_id} não encontrado"
+                        StatusReserva.ESTOQUE_INSUFICIENTE,
+                        f"Saldo insuficiente para reservar {quantidade} unidade(s) do item {item_id}",
                     )
-                return ResultadoReserva(
-                    StatusReserva.ESTOQUE_INSUFICIENTE,
-                    f"Saldo insuficiente para reservar {quantidade} unidade(s) do item {item_id}",
+                await self._repo.registrar_movimentacao(
+                    item_id, TipoMovimentacao.RESERVA, quantidade, pedido_id
                 )
-            await self._repo.registrar_movimentacao(
-                item_id, TipoMovimentacao.RESERVA, quantidade, pedido_id
-            )
-            await self._session.commit()
-            resumo = ItemResumo.de_item(item)
+                # 3.5 Reconfere a posse imediatamente antes do COMMIT: se o lease
+                #     foi perdido (TTL vencido sem renovação, Redis reiniciado,
+                #     lock tomado por outra instância), descarta a transação em vez
+                #     de disputar a seção crítica com a nova dona do lock.
+                if not await self._posse_confirmada(item_id, request_uuid):
+                    await self._session.rollback()
+                    return ResultadoReserva(
+                        StatusReserva.ESTOQUE_BLOQUEADO,
+                        "Lease do lock foi perdido durante a reserva; operação descartada",
+                    )
+                await self._session.commit()
+                resumo = ItemResumo.de_item(item)
         except IntegrityError:
             # Corrida de idempotência: outra transação registrou a reserva deste
             # par (pedido, item) — unique pedido_id+item_id+tipo. Só devolve
@@ -310,18 +325,25 @@ class EstoqueService:
             )
 
         try:
-            item = await self._repo.liberar_atomico(item_id, quantidade)
-            if item is None:
-                await self._session.rollback()
-                return ResultadoLiberacao(
-                    StatusLiberacao.INCONSISTENCIA,
-                    "Saldo reservado insuficiente para liberar a quantidade informada",
+            async with self._lock.manter_vivo(item_id, request_uuid):
+                item = await self._repo.liberar_atomico(item_id, quantidade)
+                if item is None:
+                    await self._session.rollback()
+                    return ResultadoLiberacao(
+                        StatusLiberacao.INCONSISTENCIA,
+                        "Saldo reservado insuficiente para liberar a quantidade informada",
+                    )
+                await self._repo.registrar_movimentacao(
+                    item_id, TipoMovimentacao.LIBERACAO, quantidade, pedido_id
                 )
-            await self._repo.registrar_movimentacao(
-                item_id, TipoMovimentacao.LIBERACAO, quantidade, pedido_id
-            )
-            await self._session.commit()
-            resumo = ItemResumo.de_item(item)
+                if not await self._posse_confirmada(item_id, request_uuid):
+                    await self._session.rollback()
+                    return ResultadoLiberacao(
+                        StatusLiberacao.ESTOQUE_BLOQUEADO,
+                        "Lease do lock foi perdido durante a liberação; operação descartada",
+                    )
+                await self._session.commit()
+                resumo = ItemResumo.de_item(item)
         except IntegrityError:
             # Corrida de idempotência na liberação deste par (pedido, item):
             # só devolve JA_APLICADA se a linha existente for deste item.
@@ -360,6 +382,19 @@ class EstoqueService:
     # ------------------------------------------------------------------
     # Internos
     # ------------------------------------------------------------------
+    async def _posse_confirmada(self, item_id: uuid.UUID, request_uuid: uuid.UUID) -> bool:
+        """Confere se o lock ainda é nosso antes do `COMMIT`.
+
+        Fail closed: Redis fora do ar na checagem ⇒ `False` ⇒ a transação é
+        descartada. É preferível recusar uma reserva a commitá-la sem saber se
+        a exclusão mútua ainda valia.
+        """
+        try:
+            return await self._lock.confirmar_posse(item_id, request_uuid)
+        except LockIndisponivelError as exc:
+            logger.error("Não foi possível confirmar a posse do lock de %s: %s", item_id, exc)
+            return False
+
     async def _liberar_lock(self, item_id: uuid.UUID, request_uuid: uuid.UUID) -> None:
         """Libera o lock. Falha aqui não invalida a operação já commitada."""
         try:

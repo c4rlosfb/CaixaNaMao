@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import os
 import uuid
+from contextlib import asynccontextmanager
 
 import fakeredis.aioredis
 import pytest
@@ -55,6 +56,13 @@ class LockNulo:
 
     async def liberar(self, *args, **kwargs) -> bool:
         return True
+
+    async def confirmar_posse(self, *args, **kwargs) -> bool:
+        return True
+
+    @asynccontextmanager
+    async def manter_vivo(self, *args, **kwargs):
+        yield
 
 
 class RedisFora:

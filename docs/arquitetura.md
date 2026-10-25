@@ -194,14 +194,16 @@ service EstoqueService {
    — pedido_id gerado pelo servico-pedidos antes da chamada gRPC (ver contrato em shared-protos/estoque.proto)
 2. Tenta adquirir Redis Lock (atômico): SET lock:estoque:{item_id} {request_uuid} NX EX 5
 3. Se lock não adquirido → retorna ESTOQUE_BLOQUEADO (cliente faz retry)
-4. Dentro do lock:
+4. Dentro do lock — com o lease renovado a cada TTL/3 (`PEXPIRE` via Lua, só pelo dono):
    a. Lê quantidade_disponivel em estoque_db (SELECT FOR UPDATE para consistência)
    b. Se disponivel >= quantidade:
       - quantidade_disponivel -= quantidade
       - quantidade_reservada += quantidade
       - Insere linha em movimentacoes (tipo='RESERVA', pedido_id, quantidade)
       - Persiste atomicamente em transação PostgreSQL
-   c. Se insuficiente → retorna ESTOQUE_INSUFICIENTE
+   c. Reconfere a posse do lock antes do COMMIT; se o lease foi perdido,
+      descarta a transação e retorna ESTOQUE_BLOQUEADO
+   d. Se insuficiente → retorna ESTOQUE_INSUFICIENTE
 5. Libera lock via Lua (atômico — verifica ownership antes de DEL):
    if redis.call('GET', KEYS[1]) == ARGV[1] then
      return redis.call('DEL', KEYS[1])
