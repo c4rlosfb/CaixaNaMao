@@ -68,6 +68,75 @@ def test_ttl_configuravel():
     assert RedisLockManager(object(), ttl_seconds=9).ttl_seconds == 9
 
 
+@pytest.mark.parametrize("ttl_invalido", [0, -5, False, True, 2.5, "5", None])
+def test_ttl_invalido_e_recusado_com_valueerror(ttl_invalido):
+    """TTL inválido não pode ser convertido silenciosamente para 1 s.
+
+    `bool` é subclasse de `int` e também precisa ser recusado; `ttl_seconds`
+    só aceita inteiro maior que zero.
+    """
+    with pytest.raises(ValueError, match="ttl_seconds"):
+        RedisLockManager(object(), ttl_seconds=ttl_invalido)
+
+
+# ---------------------------------------------------------------------------
+# O watchdog é acessório: falhas dele não podem derrubar a seção crítica
+# ---------------------------------------------------------------------------
+class RedisComFalhaInesperadaNaRenovacao:
+    """`SET`/`GET` funcionam; o `EVAL` de renovação levanta erro não-Redis."""
+
+    def __init__(self, real) -> None:
+        self._real = real
+
+    async def set(self, *args, **kwargs):
+        return await self._real.set(*args, **kwargs)
+
+    async def get(self, *args, **kwargs):
+        return await self._real.get(*args, **kwargs)
+
+    async def eval(self, *args, **kwargs):
+        raise RuntimeError("pool do Redis corrompido")
+
+
+class LockComWatchdogQuebrado(RedisLockManager):
+    """Watchdog que morre com exceção fora de `LockIndisponivelError`."""
+
+    async def _renovar_em_loop(self, item_id, request_uuid) -> None:
+        raise RuntimeError("watchdog quebrou")
+
+
+async def test_manter_vivo_nao_propaga_excecao_inesperada_do_watchdog(redis_fake):
+    """Erro inesperado na renovação não aborta o fluxo principal.
+
+    A decisão sobre commit inseguro continua sendo `confirmar_posse()` antes do
+    COMMIT; o watchdog não pode substituir a exceção da seção crítica por uma
+    própria (era o `await tarefa` do `finally` relançando).
+    """
+    lock = RedisLockManager(RedisComFalhaInesperadaNaRenovacao(redis_fake), ttl_seconds=1)
+    item_id = uuid.uuid4()
+    dono = uuid.uuid4()
+    assert await lock.adquirir(item_id, dono) is True
+
+    async with lock.manter_vivo(item_id, dono):
+        await asyncio.sleep(0.6)  # > intervalo de renovação (1/3 s)
+        # seção crítica segue normalmente
+
+    assert await redis_fake.get(lock.chave(item_id)) == str(dono)
+
+
+async def test_excecao_da_secao_critica_prevalece_sobre_falha_do_watchdog(redis_fake):
+    """A exceção original da transação chega ao chamador, não a do watchdog."""
+    lock = LockComWatchdogQuebrado(redis_fake, ttl_seconds=5)
+    item_id = uuid.uuid4()
+    dono = uuid.uuid4()
+    assert await lock.adquirir(item_id, dono) is True
+
+    with pytest.raises(ValueError, match="falha da transacao"):
+        async with lock.manter_vivo(item_id, dono):
+            await asyncio.sleep(0)  # deixa o watchdog falhar antes
+            raise ValueError("falha da transacao")
+
+
 # ---------------------------------------------------------------------------
 # Renovação de lease: sem ela, uma seção crítica mais longa que o TTL perde a
 # exclusão mútua no meio da operação (Issue 11 / ADR-004).

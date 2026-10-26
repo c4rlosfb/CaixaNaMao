@@ -192,6 +192,9 @@ class EstoqueService:
 
         # 3. Transação atômica, com o lease do lock renovado enquanto o bloco roda:
         #    uma transação mais longa que o TTL não deixa o lock expirar no meio.
+        #    `precisa_liberar_lock` evita um EVAL inútil (e um warning enganoso)
+        #    quando já sabemos que o lease se perdeu nesta operação.
+        precisa_liberar_lock = True
         try:
             async with self._lock.manter_vivo(item_id, request_uuid):
                 item = await self._repo.reservar_atomico(item_id, quantidade)
@@ -213,6 +216,7 @@ class EstoqueService:
                 #     lock tomado por outra instância), descarta a transação em vez
                 #     de disputar a seção crítica com a nova dona do lock.
                 if not await self._posse_confirmada(item_id, request_uuid):
+                    precisa_liberar_lock = False
                     await self._session.rollback()
                     return ResultadoReserva(
                         StatusReserva.ESTOQUE_BLOQUEADO,
@@ -258,7 +262,10 @@ class EstoqueService:
             raise
         finally:
             # 4. Liberação do lock com checagem de propriedade (ADR-004).
-            await self._liberar_lock(item_id, request_uuid)
+            #    Se a posse já foi perdida antes do COMMIT, o lock não é nosso:
+            #    liberar de novo só geraria um EVAL inútil e um warning falso.
+            if precisa_liberar_lock:
+                await self._liberar_lock(item_id, request_uuid)
 
         # 5. Evento best-effort (nunca bloqueia a operação já commitada).
         await self._publicar(
@@ -324,6 +331,7 @@ class EstoqueService:
                 "Item bloqueado por outra operação; tente novamente",
             )
 
+        precisa_liberar_lock = True
         try:
             async with self._lock.manter_vivo(item_id, request_uuid):
                 item = await self._repo.liberar_atomico(item_id, quantidade)
@@ -337,6 +345,7 @@ class EstoqueService:
                     item_id, TipoMovimentacao.LIBERACAO, quantidade, pedido_id
                 )
                 if not await self._posse_confirmada(item_id, request_uuid):
+                    precisa_liberar_lock = False
                     await self._session.rollback()
                     return ResultadoLiberacao(
                         StatusLiberacao.ESTOQUE_BLOQUEADO,
@@ -367,7 +376,8 @@ class EstoqueService:
             logger.exception("Falha ao persistir liberação do item %s", item_id)
             raise
         finally:
-            await self._liberar_lock(item_id, request_uuid)
+            if precisa_liberar_lock:
+                await self._liberar_lock(item_id, request_uuid)
 
         await self._publicar(TipoMovimentacao.LIBERACAO, item_id, pedido_id, quantidade, resumo)
         return ResultadoLiberacao(StatusLiberacao.APLICADA, "Estoque liberado com sucesso", resumo)

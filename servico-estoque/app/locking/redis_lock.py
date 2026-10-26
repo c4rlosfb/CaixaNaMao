@@ -23,7 +23,7 @@ import asyncio
 import logging
 import uuid
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
 
 from redis.exceptions import RedisError
 
@@ -61,8 +61,14 @@ class RedisLockManager:
     PREFIXO_PADRAO = "lock:estoque"
 
     def __init__(self, redis_client: object, ttl_seconds: int = 5, prefixo: str = PREFIXO_PADRAO) -> None:
+        # Validação estrita: um TTL inválido não pode virar `1` silenciosamente.
+        # `bool` é subclasse de `int` em Python e também é recusado.
+        if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, int) or ttl_seconds <= 0:
+            raise ValueError(
+                f"ttl_seconds deve ser um inteiro maior que zero (recebido: {ttl_seconds!r})"
+            )
         self._redis = redis_client
-        self._ttl = max(int(ttl_seconds), 1)
+        self._ttl = ttl_seconds
         self._prefixo = prefixo
 
     @property
@@ -162,8 +168,19 @@ class RedisLockManager:
             yield
         finally:
             tarefa.cancel()
-            with suppress(asyncio.CancelledError):
+            try:
                 await tarefa
+            except asyncio.CancelledError:
+                # Cancelamento que nós mesmos pedimos: caminho normal de saída.
+                pass
+            except Exception:
+                # O watchdog é acessório: uma falha dele nunca pode substituir a
+                # exceção da seção crítica (ex.: IntegrityError/SQLAlchemyError,
+                # que dependem do rollback feito pelo chamador).
+                logger.exception(
+                    "Watchdog do lock %s terminou com erro; exceção da seção crítica preservada",
+                    self.chave(item_id),
+                )
 
     async def _renovar_em_loop(self, item_id: uuid.UUID | str, request_uuid: uuid.UUID | str) -> None:
         chave = self.chave(item_id)
@@ -177,6 +194,16 @@ class RedisLockManager:
                     "exclusão mútua até a checagem de posse no COMMIT",
                     chave,
                     exc,
+                )
+                return
+            except Exception:
+                # Erro inesperado (bug, dublê de teste, event loop): o watchdog
+                # encerra em vez de derrubar a seção crítica; a decisão final
+                # continua sendo a reconferência de posse antes do COMMIT.
+                logger.exception(
+                    "Erro inesperado ao renovar o lock %s; watchdog encerrado e seção "
+                    "crítica preservada até a checagem de posse no COMMIT",
+                    chave,
                 )
                 return
             if not renovado:

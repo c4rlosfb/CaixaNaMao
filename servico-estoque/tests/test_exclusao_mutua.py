@@ -172,3 +172,61 @@ async def test_redis_cai_entre_o_lock_e_o_commit_e_a_reserva_e_recusada(
     assert resultado.status is StatusReserva.ESTOQUE_BLOQUEADO
     assert "descartada" in resultado.mensagem
     assert await _estado(session_factory, item_id) == (10, 0)
+
+
+# ---------------------------------------------------------------------------
+# Liberação do lock no finally
+# ---------------------------------------------------------------------------
+async def test_lease_perdido_nao_dispara_liberacao_redundante(
+    session_factory, redis_fake, monkeypatch
+):
+    """Se a posse já foi perdida antes do COMMIT, não há EVAL de liberação extra.
+
+    O lock não é mais nosso: liberar de novo só gastaria um round-trip e emitiria
+    o warning enganoso de "TTL expirado durante a operação".
+    """
+    item_id = await _criar_item(session_factory, quantidade=10)
+    lock = RedisLockManager(redis_fake, ttl_seconds=5)
+    reserva_original = EstoqueRepository.reservar_atomico
+    liberar_original = lock.liberar
+    liberacoes: list[tuple] = []
+
+    async def reserva_com_lease_tomado(self, *args, **kwargs):
+        item = await reserva_original(self, *args, **kwargs)
+        await redis_fake.delete(lock.chave(item_id))
+        await redis_fake.set(lock.chave(item_id), str(uuid.uuid4()), ex=5)
+        return item
+
+    async def liberar_espiao(*args, **kwargs):
+        liberacoes.append(args)
+        return await liberar_original(*args, **kwargs)
+
+    monkeypatch.setattr(EstoqueRepository, "reservar_atomico", reserva_com_lease_tomado)
+    monkeypatch.setattr(lock, "liberar", liberar_espiao)
+
+    resultado = await _reservar(session_factory, item_id, 2, lock)
+
+    assert resultado.status is StatusReserva.ESTOQUE_BLOQUEADO
+    assert "descartada" in resultado.mensagem
+    assert liberacoes == []
+    assert await _estado(session_factory, item_id) == (10, 0)
+
+
+async def test_reserva_normal_libera_o_lock_uma_unica_vez(redis_fake, session_factory, monkeypatch):
+    """Controle: no caminho feliz a liberação continua acontecendo (uma vez)."""
+    item_id = await _criar_item(session_factory, quantidade=10)
+    lock = RedisLockManager(redis_fake, ttl_seconds=5)
+    liberar_original = lock.liberar
+    liberacoes: list[tuple] = []
+
+    async def liberar_espiao(*args, **kwargs):
+        liberacoes.append(args)
+        return await liberar_original(*args, **kwargs)
+
+    monkeypatch.setattr(lock, "liberar", liberar_espiao)
+
+    resultado = await _reservar(session_factory, item_id, 1, lock)
+
+    assert resultado.status is StatusReserva.CONFIRMADO
+    assert len(liberacoes) == 1
+    assert await redis_fake.get(lock.chave(item_id)) is None
