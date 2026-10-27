@@ -206,6 +206,7 @@ dependência adicional.
     return redis.call('DEL', KEYS[1])
   end
   ```
+- **Renovação de lease (Sprint 3):** o TTL curto protege contra crash, mas uma seção crítica mais longa que o TTL expiraria o lease no meio da transação e outra instância entraria na mesma seção. Para fechar essa janela, o `servico-estoque` renova o TTL a cada `TTL/3` com um `PEXPIRE` condicionado ao `request_uuid` do dono e reconfere a posse imediatamente antes do `COMMIT` — se o lease foi perdido, faz rollback e devolve `ESTOQUE_BLOQUEADO`. A garantia de não vender o último item continua sendo do `UPDATE` condicional no PostgreSQL; o lock (com renovação) é o que evita trabalho concorrente e mantém a exclusão mútua durante toda a seção crítica.
 
 ### Alternativas Rejeitadas
 

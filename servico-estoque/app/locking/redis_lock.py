@@ -1,8 +1,15 @@
 """Distributed lock com Redis para a reserva de estoque (ADR-004).
 
-Aquisição atômica com `SET ... NX EX` e liberação com verificação de
-propriedade via Lua — exatamente o algoritmo documentado em
-`docs/arquitetura.md` §3.3 e no ADR-004.
+Aquisição atômica com `SET ... NX EX`, liberação com verificação de
+propriedade via Lua e **renovação de lease** enquanto a seção crítica roda —
+o algoritmo documentado em `docs/arquitetura.md` §3.3 e no ADR-004.
+
+Por que renovar: o TTL curto protege contra crash (o lock nunca fica preso),
+mas uma operação mais lenta que o TTL deixaria o lease expirar no meio da
+transação e outra instância entraria na seção crítica ao mesmo tempo. O
+watchdog de `manter_vivo()` renova o TTL a cada 1/3 do TTL — sempre condicionado
+ao `request_uuid` do dono — e o `EstoqueService` reconfirma a posse
+imediatamente antes do `COMMIT`.
 
 Importante (ver mitigação do ADR-004): se o Redis estiver indisponível, o
 chamador **falha fechado** — nunca degrada para `SELECT FOR UPDATE` isolado,
@@ -12,8 +19,11 @@ com o Redis ativo.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from redis.exceptions import RedisError
 
@@ -28,6 +38,18 @@ end
 return 0
 """
 
+# Renovação atômica: estende o TTL apenas se o dono ainda for o mesmo.
+# O TTL vai em milissegundos (PEXPIRE) para não depender de arredondamento.
+RENOVAR_LOCK_LUA = """
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+    return redis.call('PEXPIRE', KEYS[1], ARGV[2])
+end
+return 0
+"""
+
+# Piso do intervalo do watchdog: TTLs muito baixos não devem virar busy loop.
+INTERVALO_MINIMO_RENOVACAO = 0.05
+
 
 class LockIndisponivelError(RuntimeError):
     """O Redis não respondeu — o chamador deve falhar fechado."""
@@ -39,6 +61,12 @@ class RedisLockManager:
     PREFIXO_PADRAO = "lock:estoque"
 
     def __init__(self, redis_client: object, ttl_seconds: int = 5, prefixo: str = PREFIXO_PADRAO) -> None:
+        # Validação estrita: um TTL inválido não pode virar `1` silenciosamente.
+        # `bool` é subclasse de `int` em Python e também é recusado.
+        if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, int) or ttl_seconds <= 0:
+            raise ValueError(
+                f"ttl_seconds deve ser um inteiro maior que zero (recebido: {ttl_seconds!r})"
+            )
         self._redis = redis_client
         self._ttl = ttl_seconds
         self._prefixo = prefixo
@@ -46,6 +74,15 @@ class RedisLockManager:
     @property
     def ttl_seconds(self) -> int:
         return self._ttl
+
+    @property
+    def intervalo_renovacao(self) -> float:
+        """Intervalo do watchdog: 1/3 do TTL.
+
+        Duas renovações seguidas podem falhar sem que o lease expire, o que
+        absorve jitter do event loop e latência pontual do Redis.
+        """
+        return max(self._ttl / 3, INTERVALO_MINIMO_RENOVACAO)
 
     def chave(self, item_id: uuid.UUID | str) -> str:
         return f"{self._prefixo}:{item_id}"
@@ -80,3 +117,99 @@ class RedisLockManager:
         except OSError as exc:
             raise LockIndisponivelError(f"Redis inacessível ao liberar {chave}: {exc}") from exc
         return bool(resultado)
+
+    async def renovar(self, item_id: uuid.UUID | str, request_uuid: uuid.UUID | str) -> bool:
+        """Estende o TTL do lock se — e somente se — ainda formos o dono.
+
+        Devolve `False` quando o lease já expirou ou foi tomado por outra
+        instância: nesse caso a seção crítica **não** está mais protegida e o
+        chamador deve descartar a transação. Levanta `LockIndisponivelError` se
+        o Redis falhar (fail closed).
+        """
+        chave = self.chave(item_id)
+        try:
+            resultado = await self._redis.eval(
+                RENOVAR_LOCK_LUA, 1, chave, str(request_uuid), self._ttl * 1000
+            )
+        except RedisError as exc:
+            raise LockIndisponivelError(f"Redis indisponível ao renovar {chave}: {exc}") from exc
+        except OSError as exc:
+            raise LockIndisponivelError(f"Redis inacessível ao renovar {chave}: {exc}") from exc
+        return bool(resultado)
+
+    async def confirmar_posse(self, item_id: uuid.UUID | str, request_uuid: uuid.UUID | str) -> bool:
+        """Consulta, sem alterar o TTL, se o lock ainda pertence a `request_uuid`.
+
+        Usado antes do `COMMIT`: se o lease foi perdido, a transação é
+        descartada em vez de disputar a seção crítica com a nova dona.
+        """
+        chave = self.chave(item_id)
+        try:
+            valor = await self._redis.get(chave)
+        except RedisError as exc:
+            raise LockIndisponivelError(f"Redis indisponível ao consultar {chave}: {exc}") from exc
+        except OSError as exc:
+            raise LockIndisponivelError(f"Redis inacessível ao consultar {chave}: {exc}") from exc
+        if isinstance(valor, bytes):
+            valor = valor.decode("utf-8", errors="replace")
+        return valor == str(request_uuid)
+
+    @asynccontextmanager
+    async def manter_vivo(self, item_id: uuid.UUID | str, request_uuid: uuid.UUID | str) -> AsyncIterator[None]:
+        """Mantém o lease renovado enquanto o bloco crítico está em execução.
+
+        Sobe uma tarefa que chama `renovar()` a cada `intervalo_renovacao` e a
+        cancela na saída (inclusive em exceção). Perder a posse ou o Redis
+        durante a renovação encerra o watchdog com log de erro; a checagem de
+        `confirmar_posse()` antes do `COMMIT` é quem impede o commit inseguro.
+        """
+        tarefa = asyncio.create_task(self._renovar_em_loop(item_id, request_uuid))
+        try:
+            yield
+        finally:
+            tarefa.cancel()
+            try:
+                await tarefa
+            except asyncio.CancelledError:
+                # Cancelamento que nós mesmos pedimos: caminho normal de saída.
+                pass
+            except Exception:
+                # O watchdog é acessório: uma falha dele nunca pode substituir a
+                # exceção da seção crítica (ex.: IntegrityError/SQLAlchemyError,
+                # que dependem do rollback feito pelo chamador).
+                logger.exception(
+                    "Watchdog do lock %s terminou com erro; exceção da seção crítica preservada",
+                    self.chave(item_id),
+                )
+
+    async def _renovar_em_loop(self, item_id: uuid.UUID | str, request_uuid: uuid.UUID | str) -> None:
+        chave = self.chave(item_id)
+        while True:
+            await asyncio.sleep(self.intervalo_renovacao)
+            try:
+                renovado = await self.renovar(item_id, request_uuid)
+            except LockIndisponivelError as exc:
+                logger.error(
+                    "Renovação do lock %s falhou (%s); seção crítica segue sem garantia de "
+                    "exclusão mútua até a checagem de posse no COMMIT",
+                    chave,
+                    exc,
+                )
+                return
+            except Exception:
+                # Erro inesperado (bug, dublê de teste, event loop): o watchdog
+                # encerra em vez de derrubar a seção crítica; a decisão final
+                # continua sendo a reconferência de posse antes do COMMIT.
+                logger.exception(
+                    "Erro inesperado ao renovar o lock %s; watchdog encerrado e seção "
+                    "crítica preservada até a checagem de posse no COMMIT",
+                    chave,
+                )
+                return
+            if not renovado:
+                logger.error(
+                    "Lease do lock %s foi perdido (TTL expirou ou outra requisição é dona); "
+                    "a seção crítica não está mais sob exclusão mútua",
+                    chave,
+                )
+                return
