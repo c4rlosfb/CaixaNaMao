@@ -246,6 +246,10 @@ Quatro pontos sustentam a consistência:
    tocar no banco. Nunca há degradação para "reservar sem lock", que é justamente o cenário de
    venda dupla entre instâncias.
 
+> O modelo de consistência completo — invariantes, o que cada mecanismo garante e não garante,
+> cenários de falha e limitações do lock — está em
+> [`consistencia-exclusao-mutua.md`](consistencia-exclusao-mutua.md).
+
 A liberação (`ReleaseReserva`) percorre o caminho espelhado: valida a reserva registrada, aplica o
 `UPDATE` condicional sobre `quantidade_reservada`, grava a movimentação `LIBERACAO` e é
 **idempotente** — liberar duas vezes responde `sucesso = true` na segunda vez com a mensagem de que

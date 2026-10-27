@@ -215,6 +215,10 @@ service EstoqueService {
 6. Retorna resultado
 ```
 
+> Modelo de consistência e detalhamento do algoritmo — renovação de lease, reconferência de
+> posse antes do `COMMIT`, cenários de falha e limitações conhecidas:
+> [`docs/consistencia-exclusao-mutua.md`](consistencia-exclusao-mutua.md).
+
 **Modelo de dados (`estoque_db`):**
 
 ```
