@@ -1006,8 +1006,8 @@
       }
 
       if (itemAgua.quantidade_disponivel <= 0) {
-        exibirToast('a', "⚠️ O estoque de Água mineral já está zerado (0 un). Para demonstrar novamente, resete o saldo com: docker compose exec -T postgres psql -U postgres -d estoque_db < scripts/seed_dev.sql", 'warning');
-        exibirToast('b', "⚠️ O estoque de Água mineral já está zerado (0 un). Para demonstrar novamente, resete o saldo com: docker compose exec -T postgres psql -U postgres -d estoque_db < scripts/seed_dev.sql", 'warning');
+        exibirToast('a', "⚠️ O estoque de Água mineral está zerado (0 un). Para demonstrar novamente, dê dois cliques em 'reset_estoque.bat' na sua Área de Trabalho (ou execute 'bash scripts/reset_estoque.sh' na EC2).", 'warning');
+        exibirToast('b', "⚠️ O estoque de Água mineral está zerado (0 un). Para demonstrar novamente, dê dois cliques em 'reset_estoque.bat' na sua Área de Trabalho (ou execute 'bash scripts/reset_estoque.sh' na EC2).", 'warning');
       }
 
       const btnRace = document.getElementById("btn-race-condition");
