@@ -77,8 +77,8 @@ docker compose exec postgres-replica psql -U postgres -d postgres -c \
 
 Dois vendedores (Terminal 01 - Carlos e Terminal 02 - Luan) tentaram comprar o último item de **Água mineral (estoque unitário = 1)** simultaneamente no mesmo milissegundo (`Promise.all`).
 
-* **Terminal 01 (Vencedor):** `HTTP 201 Created` — Adquiriu o Lock no Redis (`lock:item:4444...`), decrementou o estoque de 1 para 0.
-* **Terminal 02 (Perdedor):** `HTTP 409 Conflict / 503 Recusado` — Bloqueado pelo Redis Lock antes de tocar o banco de dados.
+* **Terminal 02 - Luan (Vencedor):** `HTTP 201 Created` — Adquiriu o Lock no Redis (`lock:item:4444...`), decrementou o estoque de 1 para 0 e confirmou o pedido com sucesso.
+* **Terminal 01 - Carlos (Perdedor):** `HTTP 503 / 409 Recusado` — Bloqueado pelo Redis Lock antes de tocar o banco de dados (protegido contra escrita concorrente).
 * **Resultado:** **Zero Overbooking**. O estoque final permaneceu exatamente em 0 un, sem saldo negativo nem venda fantasma.
 
 ![Print 03: Battle Card da Concorrência e Exclusão Mútua](sprint3-03-battle-card-concorrencia.png)
