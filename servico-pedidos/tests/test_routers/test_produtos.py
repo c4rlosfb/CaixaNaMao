@@ -118,3 +118,19 @@ async def test_rotas_existentes_preservadas(client: AsyncClient) -> None:
     assert openapi_resp.status_code == 200
     schemas = openapi_resp.json().get("components", {}).get("schemas", {})
     assert "ProdutoResponse" in schemas
+
+
+# ---------------------------------------------------------------------------
+# GET /produtos/dev-tokens
+# ---------------------------------------------------------------------------
+
+async def test_get_dev_tokens(client: AsyncClient) -> None:
+    """Verifica se os tokens JWT pré-configurados são entregues corretamente."""
+    response = await client.get("/produtos/dev-tokens")
+    assert response.status_code == 200
+    data = response.json()
+    assert "vendedor_a" in data
+    assert "vendedor_b" in data
+    assert "vendedor_a_id" in data
+    assert "vendedor_b_id" in data
+
