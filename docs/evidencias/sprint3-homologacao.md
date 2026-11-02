@@ -138,4 +138,4 @@ INSERT 0 4
   ✅ Estoque restaurado com sucesso!
 ```
 
-> **[Print 05]:** *Janela do terminal do Windows após executar o `reset_estoque.bat` com sucesso.*
+![Print 05: Reset de Estoque em 1-Clique no Windows](sprint3-05-reset-estoque.png)
