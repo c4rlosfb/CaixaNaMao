@@ -4,16 +4,48 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
+import jwt
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.clients.estoque_client import EstoqueClient, get_estoque_client
+from app.config import settings
 from app.schemas.produto import CATALOGO_PRODUTOS, CATALOGO_PRODUTOS_MAP, ProdutoResponse
 
 router = APIRouter(prefix="/produtos", tags=["produtos"])
 
 EstoqueDep = Annotated[EstoqueClient, Depends(get_estoque_client)]
+
+
+@router.get(
+    "/dev-tokens",
+    summary="Retorna tokens JWT pré-configurados para a demonstração",
+)
+async def get_dev_tokens() -> dict[str, str]:
+    """Gera tokens JWT HS256 válidos com o segredo configurado no serviço."""
+    now = datetime.now(timezone.utc)
+    exp = now + timedelta(days=365)
+    carlos_id = "11111111-0000-0000-0000-000000000001"
+    luan_id = "22222222-0000-0000-0000-000000000002"
+    token_carlos = jwt.encode(
+        {"sub": carlos_id, "nome": "Carlos", "exp": exp},
+        settings.jwt_secret,
+        algorithm=settings.jwt_algorithm,
+    )
+    token_luan = jwt.encode(
+        {"sub": luan_id, "nome": "Luan / Eduardo", "exp": exp},
+        settings.jwt_secret,
+        algorithm=settings.jwt_algorithm,
+    )
+    return {
+        "vendedor_a": token_carlos,
+        "vendedor_b": token_luan,
+        "vendedor_a_id": carlos_id,
+        "vendedor_b_id": luan_id,
+    }
+
 
 
 @router.get(

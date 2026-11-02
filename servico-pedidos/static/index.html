@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>CaixaNaMão — Terminal do Ambulante</title>
-  <meta name="description" content="CaixaNaMão: Sistema Distribuído para Controle de Vendas e Estoque Concorrente em Tempo Real." />
+  <title>CaixaNaMão — Terminal do Ambulante e Simulador Multi-Vendedor</title>
+  <meta name="description" content="CaixaNaMão: Sistema Distribuído para Controle de Vendas e Estoque Concorrente em Tempo Real com Redis Lock e UUID." />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
@@ -16,93 +16,737 @@
         extend: {
           fontFamily: {
             sans: ['Inter', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
           },
           colors: {
             brand: {
               50: '#eff6ff',
+              400: '#60a5fa',
               500: '#3b82f6',
               600: '#2563eb',
               700: '#1d4ed8',
+              800: '#1e40af',
+              900: '#1e3a8a',
             }
           }
         }
       }
     }
   </script>
+  <style>
+    /* Custom scrollbar for dark modern feel */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #0f172a;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #334155;
+      border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #475569;
+    }
+    .pulse-glow-amber {
+      animation: pulseGlowAmber 2s infinite;
+    }
+    @keyframes pulseGlowAmber {
+      0%, 100% { box-shadow: 0 0 12px rgba(245, 158, 11, 0.2); }
+      50% { box-shadow: 0 0 24px rgba(245, 158, 11, 0.45); }
+    }
+  </style>
 </head>
-<body class="bg-slate-950 text-slate-100 min-h-screen font-sans flex flex-col antialiased selection:bg-brand-500 selection:text-white">
+<body class="bg-slate-950 text-slate-100 min-h-screen font-sans flex flex-col antialiased selection:bg-blue-600 selection:text-white">
 
-  <!-- Header Global -->
-  <header class="border-b border-slate-800/80 bg-slate-900/60 backdrop-blur sticky top-0 z-50 px-6 py-4 flex items-center justify-between">
-    <div class="flex items-center space-x-3">
-      <div class="h-9 w-9 rounded-lg bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center font-bold text-white shadow-lg shadow-blue-500/20">
+  <!-- ========================================================================= -->
+  <!-- Top Navigation Header -->
+  <!-- ========================================================================= -->
+  <header class="border-b border-slate-800/80 bg-slate-900/80 backdrop-blur-md sticky top-0 z-50 px-6 py-3.5 flex flex-wrap items-center justify-between gap-4 shadow-lg shadow-black/20">
+    <div class="flex items-center space-x-3.5">
+      <div class="h-10 w-10 rounded-xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-violet-500 flex items-center justify-center font-black text-white text-lg shadow-md shadow-blue-500/30 ring-1 ring-white/20">
         ⚡
       </div>
       <div>
-        <h1 class="text-lg font-bold tracking-tight text-white flex items-center gap-2">
-          CaixaNaMão
-          <span class="text-xs px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 font-medium">Sprint 3</span>
-        </h1>
-        <p class="text-xs text-slate-400">Terminal do Ambulante • Sistemas Distribuídos</p>
+        <div class="flex items-center gap-2.5">
+          <h1 class="text-lg font-bold tracking-tight text-white">CaixaNaMão</h1>
+          <span class="text-xs px-2.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 font-semibold uppercase tracking-wider">
+            Sprint 3
+          </span>
+          <span class="text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium">
+            Sistemas Distribuídos
+          </span>
+        </div>
+        <p class="text-xs text-slate-400 mt-0.5">Terminal do Ambulante • Exclusão Mútua Redis Lock & Rastreabilidade UUID</p>
       </div>
     </div>
-    <div class="flex items-center space-x-4">
-      <div class="flex items-center gap-2 text-xs text-slate-400 bg-slate-800/50 px-3 py-1.5 rounded-md border border-slate-700/50">
-        <span class="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
-        <span>servico-pedidos :8000</span>
+
+    <!-- Health indicators & Action controls -->
+    <div class="flex items-center flex-wrap gap-2.5">
+      <button id="btn-sync-estoque" onclick="recarregarCatalogo()" class="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-300 bg-slate-800/80 hover:bg-slate-700 hover:text-white rounded-lg border border-slate-700 transition shadow-sm active:scale-95" title="Recarregar catálogo e saldos de estoque">
+        <svg id="icon-refresh" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+        <span>Atualizar Estoque</span>
+      </button>
+
+      <div class="flex items-center gap-2 text-xs text-slate-300 bg-slate-900/90 px-3 py-1.5 rounded-lg border border-slate-800">
+        <span class="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
+        <span class="font-mono text-slate-400">gRPC :50051</span>
       </div>
-      <a href="/docs" target="_blank" class="text-xs text-slate-300 hover:text-white transition-colors bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-md border border-slate-700 font-medium">
-        Swagger / API Docs ↗
+
+      <div class="flex items-center gap-2 text-xs text-slate-300 bg-slate-900/90 px-3 py-1.5 rounded-lg border border-slate-800">
+        <span class="h-2 w-2 rounded-full bg-red-400 animate-pulse"></span>
+        <span class="font-mono text-slate-400">Redis Lock</span>
+      </div>
+
+      <a href="/docs" target="_blank" class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-700 rounded-lg border border-slate-700 transition">
+        <span>Swagger</span>
+        <svg class="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
       </a>
     </div>
   </header>
 
-  <!-- Container Principal -->
-  <main class="flex-1 max-w-7xl w-full mx-auto p-6 flex flex-col gap-6">
-    <div class="bg-gradient-to-r from-slate-900 to-slate-850 rounded-xl border border-slate-800 p-6 shadow-xl">
-      <h2 class="text-xl font-bold text-white mb-2">Ambiente de Demonstração e Venda Simultânea</h2>
-      <p class="text-sm text-slate-400">
-        Interface gráfica configurada para demonstração prática de concorrência distribuída com exclusão mútua via <strong>Redis Lock</strong> e rastreabilidade transacional de ponta a ponta com <strong>UUID</strong>.
-      </p>
+  <!-- ========================================================================= -->
+  <!-- Race Condition Simulation Bar (Issue #39 / Concurrency Demo) -->
+  <!-- ========================================================================= -->
+  <section class="max-w-7xl w-full mx-auto px-6 pt-6">
+    <div class="bg-gradient-to-r from-blue-950/60 via-slate-900 to-indigo-950/60 border border-blue-500/30 rounded-2xl p-5 shadow-2xl relative overflow-hidden">
+      <div class="absolute -right-8 -top-8 w-40 h-40 bg-blue-500/10 rounded-full blur-3xl pointer-events-none"></div>
+      <div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div>
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-bold uppercase tracking-wider text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded">
+              Demonstração Prática
+            </span>
+            <h2 class="text-base font-bold text-white">Simulador de Concorrência & Exclusão Mútua</h2>
+          </div>
+          <p class="text-xs text-slate-400 mt-1 max-w-2xl leading-relaxed">
+            Dispara duas ordens de compra de <strong>Água mineral (estoque unitário = 1)</strong> simultaneamente para o Vendedor A e Vendedor B no exato mesmo milissegundo. O <strong>Redis Lock</strong> garantirá que apenas um pedido confirme (201) e o concorrente seja rejeitado (422/409).
+          </p>
+        </div>
+        <button id="btn-race-condition" onclick="executarCorridaConcorrente()" class="pulse-glow-amber whitespace-nowrap px-5 py-3 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-bold text-xs uppercase tracking-wider shadow-lg shadow-amber-500/20 flex items-center gap-2.5 transition transform active:scale-95">
+          <svg class="w-4 h-4 text-slate-950" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clip-rule="evenodd"/></svg>
+          <span>⚡ Testar Corrida Concorrente (Race Condition)</span>
+        </button>
+      </div>
     </div>
+  </section>
 
-    <!-- Terminais Split-Screen Container (Issue #37) -->
-    <div id="terminals-container" class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      <!-- Terminal Vendedor A -->
-      <section class="bg-slate-900/90 rounded-xl border border-slate-800 p-6 flex flex-col shadow-lg">
-        <div class="flex items-center justify-between pb-4 border-b border-slate-800">
+  <!-- ========================================================================= -->
+  <!-- Split-Screen Terminals Container -->
+  <!-- ========================================================================= -->
+  <main class="flex-1 max-w-7xl w-full mx-auto p-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+    <!-- ----------------------------------------------------------------------- -->
+    <!-- TERMINAL 01: Vendedor A (Carlos) -->
+    <!-- ----------------------------------------------------------------------- -->
+    <section class="bg-slate-900/90 rounded-2xl border border-slate-800 p-5 flex flex-col shadow-xl ring-1 ring-white/5 relative">
+      <!-- Terminal Header -->
+      <div class="flex items-center justify-between pb-4 border-b border-slate-800 mb-4">
+        <div class="flex items-center gap-3">
+          <div class="h-9 w-9 rounded-xl bg-blue-500/10 border border-blue-500/30 flex items-center justify-center font-bold text-blue-400">
+            A
+          </div>
           <div>
-            <span class="text-xs font-semibold uppercase tracking-wider text-blue-400">Terminal 01</span>
+            <div class="flex items-center gap-2">
+              <span class="text-[11px] font-bold uppercase tracking-wider text-blue-400">Terminal 01</span>
+              <span class="inline-block h-1.5 w-1.5 rounded-full bg-blue-500"></span>
+            </div>
             <h3 class="text-base font-bold text-white">Vendedor A (Carlos)</h3>
           </div>
-          <span class="text-xs px-2.5 py-1 rounded bg-slate-800 text-slate-300 border border-slate-700 font-mono">JWT: Carlos</span>
         </div>
-        <div class="py-6 flex flex-col items-center justify-center text-center text-slate-500 space-y-2">
-          <div class="p-3 rounded-full bg-slate-800/60 text-slate-400">📦</div>
-          <p class="text-sm">Catálogo e carrinho carregando via API...</p>
+        <div class="text-right">
+          <span class="text-[11px] px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono border border-slate-700/60 block">
+            ID: ...0001
+          </span>
+          <span class="text-[10px] text-emerald-400 flex items-center justify-end gap-1 mt-1">
+            <span class="h-1.5 w-1.5 rounded-full bg-emerald-400"></span> JWT Ativo
+          </span>
         </div>
-      </section>
+      </div>
 
-      <!-- Terminal Vendedor B -->
-      <section class="bg-slate-900/90 rounded-xl border border-slate-800 p-6 flex flex-col shadow-lg">
-        <div class="flex items-center justify-between pb-4 border-b border-slate-800">
-          <div>
-            <span class="text-xs font-semibold uppercase tracking-wider text-emerald-400">Terminal 02</span>
-            <h3 class="text-base font-bold text-white">Vendedor B (Eduardo / Luan)</h3>
+      <!-- Toast Feedback Terminal A -->
+      <div id="toast-terminal-a" class="hidden mb-4 p-3 rounded-xl border text-xs flex items-start gap-2.5 transition"></div>
+
+      <!-- Product Catalog Cards Grid -->
+      <div class="mb-4">
+        <div class="flex items-center justify-between mb-2">
+          <h4 class="text-xs font-semibold uppercase tracking-wider text-slate-400">Catálogo de Produtos</h4>
+          <span class="text-[11px] text-slate-500">Saldo em tempo real</span>
+        </div>
+        <div id="catalog-terminal-a" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <!-- Populated by JS -->
+          <div class="p-6 text-center text-slate-500 text-xs col-span-2">Carregando catálogo...</div>
+        </div>
+      </div>
+
+      <!-- Shopping Cart / Checkout Section -->
+      <div class="mt-auto pt-4 border-t border-slate-800/80 bg-slate-950/40 rounded-xl p-4 border border-slate-800/60">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+            <h4 class="text-xs font-bold uppercase tracking-wider text-slate-300">Carrinho de Compras</h4>
           </div>
-          <span class="text-xs px-2.5 py-1 rounded bg-slate-800 text-slate-300 border border-slate-700 font-mono">JWT: Luan</span>
+          <button onclick="limparCarrinho('a')" class="text-[11px] text-slate-400 hover:text-slate-200 transition">
+            Limpar
+          </button>
         </div>
-        <div class="py-6 flex flex-col items-center justify-center text-center text-slate-500 space-y-2">
-          <div class="p-3 rounded-full bg-slate-800/60 text-slate-400">📦</div>
-          <p class="text-sm">Catálogo e carrinho carregando via API...</p>
+
+        <div id="cart-items-terminal-a" class="space-y-2 mb-3 max-h-36 overflow-y-auto pr-1">
+          <p class="text-xs text-slate-500 text-center py-3 italic">Carrinho vazio. Selecione itens acima.</p>
         </div>
-      </section>
-    </div>
+
+        <div class="flex items-center justify-between pt-3 border-t border-slate-800/80 mb-3">
+          <span class="text-xs text-slate-400">Total do Pedido:</span>
+          <span id="cart-total-terminal-a" class="text-base font-extrabold text-white">R$ 0,00</span>
+        </div>
+
+        <button id="btn-confirmar-a" onclick="confirmarVenda('a')" disabled class="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 disabled:text-slate-600 disabled:cursor-not-allowed text-white font-bold text-xs uppercase tracking-wider shadow-lg shadow-blue-600/20 flex items-center justify-center gap-2 transition active:scale-[0.98]">
+          <span id="btn-text-a">Confirmar Venda</span>
+          <svg id="btn-spinner-a" class="hidden w-4 h-4 animate-spin text-white" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+        </button>
+      </div>
+    </section>
+
+    <!-- ----------------------------------------------------------------------- -->
+    <!-- TERMINAL 02: Vendedor B (Luan / Eduardo) -->
+    <!-- ----------------------------------------------------------------------- -->
+    <section class="bg-slate-900/90 rounded-2xl border border-slate-800 p-5 flex flex-col shadow-xl ring-1 ring-white/5 relative">
+      <!-- Terminal Header -->
+      <div class="flex items-center justify-between pb-4 border-b border-slate-800 mb-4">
+        <div class="flex items-center gap-3">
+          <div class="h-9 w-9 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center font-bold text-emerald-400">
+            B
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="text-[11px] font-bold uppercase tracking-wider text-emerald-400">Terminal 02</span>
+              <span class="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
+            </div>
+            <h3 class="text-base font-bold text-white">Vendedor B (Luan / Eduardo)</h3>
+          </div>
+        </div>
+        <div class="text-right">
+          <span class="text-[11px] px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono border border-slate-700/60 block">
+            ID: ...0002
+          </span>
+          <span class="text-[10px] text-emerald-400 flex items-center justify-end gap-1 mt-1">
+            <span class="h-1.5 w-1.5 rounded-full bg-emerald-400"></span> JWT Ativo
+          </span>
+        </div>
+      </div>
+
+      <!-- Toast Feedback Terminal B -->
+      <div id="toast-terminal-b" class="hidden mb-4 p-3 rounded-xl border text-xs flex items-start gap-2.5 transition"></div>
+
+      <!-- Product Catalog Cards Grid -->
+      <div class="mb-4">
+        <div class="flex items-center justify-between mb-2">
+          <h4 class="text-xs font-semibold uppercase tracking-wider text-slate-400">Catálogo de Produtos</h4>
+          <span class="text-[11px] text-slate-500">Saldo em tempo real</span>
+        </div>
+        <div id="catalog-terminal-b" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <!-- Populated by JS -->
+          <div class="p-6 text-center text-slate-500 text-xs col-span-2">Carregando catálogo...</div>
+        </div>
+      </div>
+
+      <!-- Shopping Cart / Checkout Section -->
+      <div class="mt-auto pt-4 border-t border-slate-800/80 bg-slate-950/40 rounded-xl p-4 border border-slate-800/60">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+            <h4 class="text-xs font-bold uppercase tracking-wider text-slate-300">Carrinho de Compras</h4>
+          </div>
+          <button onclick="limparCarrinho('b')" class="text-[11px] text-slate-400 hover:text-slate-200 transition">
+            Limpar
+          </button>
+        </div>
+
+        <div id="cart-items-terminal-b" class="space-y-2 mb-3 max-h-36 overflow-y-auto pr-1">
+          <p class="text-xs text-slate-500 text-center py-3 italic">Carrinho vazio. Selecione itens acima.</p>
+        </div>
+
+        <div class="flex items-center justify-between pt-3 border-t border-slate-800/80 mb-3">
+          <span class="text-xs text-slate-400">Total do Pedido:</span>
+          <span id="cart-total-terminal-b" class="text-base font-extrabold text-white">R$ 0,00</span>
+        </div>
+
+        <button id="btn-confirmar-b" onclick="confirmarVenda('b')" disabled class="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-600 disabled:cursor-not-allowed text-white font-bold text-xs uppercase tracking-wider shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2 transition active:scale-[0.98]">
+          <span id="btn-text-b">Confirmar Venda</span>
+          <svg id="btn-spinner-b" class="hidden w-4 h-4 animate-spin text-white" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+        </button>
+      </div>
+    </section>
+
   </main>
 
-  <footer class="border-t border-slate-800 text-center py-4 text-xs text-slate-500 bg-slate-900/40">
-    CaixaNaMão • Projeto Integrador / Sistemas Distribuídos • Sprint 3
+  <!-- ========================================================================= -->
+  <!-- Real-time Telemetry & Transaction Audit Table (Issue #39 ready) -->
+  <!-- ========================================================================= -->
+  <section class="max-w-7xl w-full mx-auto px-6 pb-12">
+    <div class="bg-slate-900/90 rounded-2xl border border-slate-800 p-5 shadow-xl">
+      <div class="flex items-center justify-between pb-3 mb-3 border-b border-slate-800">
+        <div class="flex items-center gap-3">
+          <div class="h-8 w-8 rounded-lg bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400 font-mono text-xs">
+            📊
+          </div>
+          <div>
+            <h3 class="text-sm font-bold text-white flex items-center gap-2">
+              Auditoria de Transações e Telemetria em Tempo Real
+              <span class="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700 font-mono">
+                X-Correlation-ID
+              </span>
+            </h3>
+            <p class="text-[11px] text-slate-400">Rastreabilidade ponta a ponta correlacionável com os logs do Docker</p>
+          </div>
+        </div>
+        <button onclick="limparLogs()" class="text-xs text-slate-400 hover:text-slate-200 px-3 py-1 rounded bg-slate-800 hover:bg-slate-700 transition">
+          Limpar Logs
+        </button>
+      </div>
+
+      <!-- Audit Table -->
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-xs">
+          <thead>
+            <tr class="text-slate-400 border-b border-slate-800 font-mono">
+              <th class="py-2.5 px-3">Horário</th>
+              <th class="py-2.5 px-3">Terminal</th>
+              <th class="py-2.5 px-3">Status HTTP</th>
+              <th class="py-2.5 px-3">X-Correlation-ID (UUID)</th>
+              <th class="py-2.5 px-3">Idempotency-Key</th>
+              <th class="py-2.5 px-3 text-right">Latência</th>
+            </tr>
+          </thead>
+          <tbody id="telemetry-table-body" class="divide-y divide-slate-800/60 font-mono text-[11px]">
+            <tr id="empty-telemetry-row">
+              <td colspan="6" class="py-6 text-center text-slate-500 italic">
+                Nenhuma transação executada nesta sessão. Faça uma venda acima para visualizar os logs.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="border-t border-slate-800/80 py-4 text-center text-xs text-slate-500 bg-slate-900/40">
+    CaixaNaMão • Sistemas Distribuídos • Sprint 3 — Exclusão Mútua & Consistência Eventual
   </footer>
 
+  <!-- ========================================================================= -->
+  <!-- Client JavaScript Logic (Zero-Bloat, Native Vanilla JS) -->
+  <!-- ========================================================================= -->
+  <script>
+    // Global State
+    let produtosCatalogo = [];
+    let tokens = {
+      vendedor_a: "",
+      vendedor_b: "",
+      vendedor_a_id: "11111111-0000-0000-0000-000000000001",
+      vendedor_b_id: "22222222-0000-0000-0000-000000000002"
+    };
+
+    const carrinhos = {
+      a: {}, // { itemId: { produto, quantidade } }
+      b: {}
+    };
+
+    // Product Icons Map
+    const PRODUCT_ICONS = {
+      "Coxinha": "🍗",
+      "Pastel de carne": "🥟",
+      "Refrigerante lata": "🥤",
+      "Água mineral": "💧"
+    };
+
+    // Helper: generate standard UUID v4
+    function gerarUUID() {
+      if (crypto.randomUUID) return crypto.randomUUID();
+      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+      });
+    }
+
+    // Helper: format currency BRL
+    function formatarMoeda(valor) {
+      return Number(valor).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    }
+
+    // Initialize Application
+    async function inicializarApp() {
+      await carregarTokens();
+      await recarregarCatalogo();
+    }
+
+    // Fetch JWT tokens from backend
+    async function carregarTokens() {
+      try {
+        const res = await fetch("/produtos/dev-tokens");
+        if (res.ok) {
+          const data = await res.json();
+          tokens = data;
+        }
+      } catch (err) {
+        console.warn("Falha ao obter tokens dinâmicos, usando tokens de fallback", err);
+      }
+    }
+
+    // Fetch Products Catalog & Stock via GET /produtos
+    async function recarregarCatalogo() {
+      const icon = document.getElementById("icon-refresh");
+      if (icon) icon.classList.add("animate-spin");
+
+      try {
+        const res = await fetch("/produtos");
+        if (!res.ok) throw new Error("Erro ao consultar catálogo");
+        produtosCatalogo = await res.json();
+        renderizarCatalogo('a');
+        renderizarCatalogo('b');
+        atualizarVisualizacaoCarrinho('a');
+        atualizarVisualizacaoCarrinho('b');
+      } catch (err) {
+        console.error("Erro ao carregar catálogo:", err);
+      } finally {
+        if (icon) icon.classList.remove("animate-spin");
+      }
+    }
+
+    // Render Product Cards for a given terminal ('a' or 'b')
+    function renderizarCatalogo(terminal) {
+      const container = document.getElementById(`catalog-terminal-${terminal}`);
+      if (!container) return;
+
+      container.innerHTML = produtosCatalogo.map(prod => {
+        const qtdDisponivel = prod.quantidade_disponivel;
+        const icon = PRODUCT_ICONS[prod.nome] || "📦";
+        const isEsgotado = qtdDisponivel <= 0;
+        const isUltimoItem = qtdDisponivel === 1;
+
+        let badgeClass = "bg-emerald-500/10 text-emerald-400 border-emerald-500/20";
+        let badgeText = `${qtdDisponivel} un disponíveis`;
+
+        if (isEsgotado) {
+          badgeClass = "bg-red-500/10 text-red-400 border-red-500/20";
+          badgeText = "Esgotado";
+        } else if (isUltimoItem) {
+          badgeClass = "bg-amber-500/10 text-amber-400 border-amber-500/20 font-bold";
+          badgeText = "⚡ 1 un restante!";
+        }
+
+        const borderAccent = isUltimoItem ? "border-amber-500/40" : "border-slate-800";
+
+        return `
+          <div class="bg-slate-950/70 border ${borderAccent} rounded-xl p-3.5 flex flex-col justify-between hover:border-slate-700 transition shadow-sm group">
+            <div>
+              <div class="flex items-start justify-between gap-2 mb-2">
+                <span class="text-2xl p-1.5 rounded-lg bg-slate-900 border border-slate-800">${icon}</span>
+                <span class="text-[10px] px-2 py-0.5 rounded-full border ${badgeClass}">
+                  ${badgeText}
+                </span>
+              </div>
+              <h5 class="text-xs font-bold text-white group-hover:text-blue-400 transition">${prod.nome}</h5>
+              <p class="text-[11px] text-slate-400 line-clamp-1 mb-2.5">${prod.descricao}</p>
+            </div>
+            <div class="flex items-center justify-between pt-2 border-t border-slate-900">
+              <span class="text-sm font-extrabold text-white">${formatarMoeda(prod.preco)}</span>
+              <button 
+                onclick="adicionarAoCarrinho('${terminal}', '${prod.id}')"
+                ${isEsgotado ? 'disabled' : ''}
+                class="px-2.5 py-1 text-xs font-semibold rounded-lg ${terminal === 'a' ? 'bg-blue-600 hover:bg-blue-500' : 'bg-emerald-600 hover:bg-emerald-500'} disabled:bg-slate-800 disabled:text-slate-600 disabled:cursor-not-allowed text-white transition active:scale-95">
+                + Adicionar
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // Add item to cart
+    function adicionarAoCarrinho(terminal, produtoId) {
+      const prod = produtosCatalogo.find(p => p.id === produtoId);
+      if (!prod || prod.quantidade_disponivel <= 0) return;
+
+      const carrinho = carrinhos[terminal];
+      const itemNoCarrinho = carrinho[produtoId];
+      const qtdAtual = itemNoCarrinho ? itemNoCarrinho.quantidade : 0;
+
+      if (qtdAtual >= prod.quantidade_disponivel) {
+        exibirToast(terminal, `Quantidade máxima disponível no estoque (${prod.quantidade_disponivel} un) atingida.`, 'warning');
+        return;
+      }
+
+      carrinho[produtoId] = {
+        produto: prod,
+        quantidade: qtdAtual + 1
+      };
+
+      atualizarVisualizacaoCarrinho(terminal);
+    }
+
+    // Remove or decrement item from cart
+    function decrementarDoCarrinho(terminal, produtoId) {
+      const carrinho = carrinhos[terminal];
+      if (!carrinho[produtoId]) return;
+
+      if (carrinho[produtoId].quantidade > 1) {
+        carrinho[produtoId].quantidade -= 1;
+      } else {
+        delete carrinho[produtoId];
+      }
+
+      atualizarVisualizacaoCarrinho(terminal);
+    }
+
+    // Clear cart
+    function limparCarrinho(terminal) {
+      carrinhos[terminal] = {};
+      atualizarVisualizacaoCarrinho(terminal);
+    }
+
+    // Update cart UI
+    function atualizarVisualizacaoCarrinho(terminal) {
+      const container = document.getElementById(`cart-items-terminal-${terminal}`);
+      const totalEl = document.getElementById(`cart-total-terminal-${terminal}`);
+      const btnConfirmar = document.getElementById(`btn-confirmar-${terminal}`);
+      const carrinho = carrinhos[terminal];
+
+      const itemKeys = Object.keys(carrinho);
+      if (itemKeys.length === 0) {
+        container.innerHTML = `<p class="text-xs text-slate-500 text-center py-3 italic">Carrinho vazio. Selecione itens acima.</p>`;
+        totalEl.textContent = formatarMoeda(0);
+        btnConfirmar.disabled = true;
+        return;
+      }
+
+      let total = 0;
+      container.innerHTML = itemKeys.map(id => {
+        const item = carrinho[id];
+        const subtotal = item.quantidade * Number(item.produto.preco);
+        total += subtotal;
+
+        return `
+          <div class="flex items-center justify-between text-xs bg-slate-900/60 p-2 rounded-lg border border-slate-800">
+            <div class="flex-1 min-w-0 pr-2">
+              <span class="font-bold text-white truncate block">${item.produto.nome}</span>
+              <span class="text-[10px] text-slate-400">${item.quantidade}x ${formatarMoeda(item.produto.preco)}</span>
+            </div>
+            <div class="flex items-center gap-1.5">
+              <span class="font-mono font-bold text-slate-200">${formatarMoeda(subtotal)}</span>
+              <button onclick="decrementarDoCarrinho('${terminal}', '${id}')" class="h-5 w-5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center font-bold text-xs transition">
+                -
+              </button>
+              <button onclick="adicionarAoCarrinho('${terminal}', '${id}')" class="h-5 w-5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center font-bold text-xs transition">
+                +
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      totalEl.textContent = formatarMoeda(total);
+      btnConfirmar.disabled = false;
+    }
+
+    // Confirm Order (POST /pedidos)
+    async function confirmarVenda(terminal) {
+      const carrinho = carrinhos[terminal];
+      const itemKeys = Object.keys(carrinho);
+      if (itemKeys.length === 0) return;
+
+      const btn = document.getElementById(`btn-confirmar-${terminal}`);
+      const btnText = document.getElementById(`btn-text-${terminal}`);
+      const btnSpinner = document.getElementById(`btn-spinner-${terminal}`);
+
+      btn.disabled = true;
+      btnText.textContent = "Processando...";
+      btnSpinner.classList.remove("hidden");
+
+      const token = terminal === 'a' ? tokens.vendedor_a : tokens.vendedor_b;
+      const idempotencyKey = gerarUUID();
+      const correlationId = gerarUUID();
+
+      const payload = {
+        itens: itemKeys.map(id => ({
+          item_id: id,
+          quantidade: carrinho[id].quantidade,
+          preco_unitario: Number(carrinho[id].produto.preco).toFixed(2)
+        }))
+      };
+
+      const startTime = performance.now();
+      let status = 0;
+      let latency = 0;
+      let respCorrelationId = correlationId;
+
+      try {
+        const response = await fetch("/pedidos", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`,
+            "Idempotency-Key": idempotencyKey,
+            "X-Correlation-ID": correlationId
+          },
+          body: JSON.stringify(payload)
+        });
+
+        latency = Math.round(performance.now() - startTime);
+        status = response.status;
+        respCorrelationId = response.headers.get("X-Correlation-ID") || correlationId;
+
+        const data = await response.json().catch(() => ({}));
+
+        if (response.status === 201) {
+          exibirToast(
+            terminal,
+            `✅ Pedido #${data.id.slice(0, 8)} confirmado com sucesso! Total: ${formatarMoeda(data.total)}`,
+            'success'
+          );
+          limparCarrinho(terminal);
+        } else if (response.status === 409 || response.status === 422 || response.status === 400) {
+          const detalhe = data.detail || "Conflito de Concorrência — Estoque Bloqueado ou Insuficiente";
+          exibirToast(
+            terminal,
+            `⚠️ HTTP ${status}: ${detalhe}`,
+            'error'
+          );
+        } else {
+          exibirToast(
+            terminal,
+            `❌ Erro inesperado (HTTP ${status}): ${data.detail || 'Falha no serviço'}`,
+            'error'
+          );
+        }
+
+        // Registrar telemetria
+        registrarTelemetria({
+          terminal: terminal === 'a' ? 'Terminal 01 (Carlos)' : 'Terminal 02 (Luan)',
+          status: status,
+          correlationId: respCorrelationId,
+          idempotencyKey: idempotencyKey,
+          latency: latency
+        });
+
+      } catch (err) {
+        latency = Math.round(performance.now() - startTime);
+        exibirToast(terminal, `Erro de rede ao conectar com o serviço: ${err.message}`, 'error');
+        registrarTelemetria({
+          terminal: terminal === 'a' ? 'Terminal 01 (Carlos)' : 'Terminal 02 (Luan)',
+          status: 503,
+          correlationId: correlationId,
+          idempotencyKey: idempotencyKey,
+          latency: latency
+        });
+      } finally {
+        btnText.textContent = "Confirmar Venda";
+        btnSpinner.classList.add("hidden");
+        // Recarregar estoque para refletir alteração ou decremento
+        await recarregarCatalogo();
+      }
+    }
+
+    // Display feedback toast
+    function exibirToast(terminal, mensagem, tipo = 'info') {
+      const toast = document.getElementById(`toast-terminal-${terminal}`);
+      if (!toast) return;
+
+      toast.className = `p-3 rounded-xl border text-xs flex items-start gap-2.5 transition mb-4 shadow-md`;
+      if (tipo === 'success') {
+        toast.className += ` bg-emerald-500/10 border-emerald-500/30 text-emerald-300`;
+      } else if (tipo === 'error') {
+        toast.className += ` bg-red-500/10 border-red-500/30 text-red-300`;
+      } else if (tipo === 'warning') {
+        toast.className += ` bg-amber-500/10 border-amber-500/30 text-amber-300`;
+      } else {
+        toast.className += ` bg-blue-500/10 border-blue-500/30 text-blue-300`;
+      }
+
+      toast.innerHTML = `
+        <div class="flex-1">${mensagem}</div>
+        <button onclick="this.parentElement.classList.add('hidden')" class="text-slate-400 hover:text-white">&times;</button>
+      `;
+      toast.classList.remove('hidden');
+
+      setTimeout(() => {
+        toast.classList.add('hidden');
+      }, 6000);
+    }
+
+    // Telemetry log entry
+    function registrarTelemetria({ terminal, status, correlationId, idempotencyKey, latency }) {
+      const tbody = document.getElementById("telemetry-table-body");
+      const emptyRow = document.getElementById("empty-telemetry-row");
+      if (emptyRow) emptyRow.remove();
+
+      const now = new Date().toLocaleTimeString('pt-BR', { hour12: false }) + '.' + String(new Date().getMilliseconds()).padStart(3, '0');
+      const isSuccess = status === 200 || status === 201;
+      const statusBadge = isSuccess
+        ? `<span class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-bold">${status}</span>`
+        : `<span class="px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/30 font-bold">${status}</span>`;
+
+      const tr = document.createElement("tr");
+      tr.className = "hover:bg-slate-800/40 transition border-b border-slate-800/40";
+      tr.innerHTML = `
+        <td class="py-2.5 px-3 text-slate-400">${now}</td>
+        <td class="py-2.5 px-3 font-semibold ${terminal.includes('01') ? 'text-blue-400' : 'text-emerald-400'}">${terminal}</td>
+        <td class="py-2.5 px-3">${statusBadge}</td>
+        <td class="py-2.5 px-3 text-slate-300" title="${correlationId}">${correlationId.slice(0, 18)}...</td>
+        <td class="py-2.5 px-3 text-slate-400" title="${idempotencyKey}">${idempotencyKey.slice(0, 8)}...</td>
+        <td class="py-2.5 px-3 text-right font-bold ${latency < 100 ? 'text-emerald-400' : 'text-amber-400'}">${latency} ms</td>
+      `;
+
+      tbody.insertBefore(tr, tbody.firstChild);
+    }
+
+    function limparLogs() {
+      const tbody = document.getElementById("telemetry-table-body");
+      tbody.innerHTML = `
+        <tr id="empty-telemetry-row">
+          <td colspan="6" class="py-6 text-center text-slate-500 italic">
+            Nenhuma transação executada nesta sessão. Faça uma venda acima para visualizar os logs.
+          </td>
+        </tr>
+      `;
+    }
+
+    // ⚡ Execute Race Condition Test (Simultaneously test Redis Lock)
+    async function executarCorridaConcorrente() {
+      // Find 'Água mineral' item
+      const itemAgua = produtosCatalogo.find(p => p.nome.toLowerCase().includes("água") || p.nome.toLowerCase().includes("agua"));
+      if (!itemAgua) {
+        alert("Item 'Água mineral' não encontrado no catálogo.");
+        return;
+      }
+
+      const btnRace = document.getElementById("btn-race-condition");
+      btnRace.disabled = true;
+      btnRace.innerHTML = `<span>⚡ Disparando Race Condition concorrente...</span>`;
+
+      // Set 1 Água mineral in both carts
+      carrinhos['a'] = { [itemAgua.id]: { produto: itemAgua, quantidade: 1 } };
+      carrinhos['b'] = { [itemAgua.id]: { produto: itemAgua, quantidade: 1 } };
+      atualizarVisualizacaoCarrinho('a');
+      atualizarVisualizacaoCarrinho('b');
+
+      // Execute simultaneously using Promise.all
+      await Promise.all([
+        confirmarVenda('a'),
+        confirmarVenda('b')
+      ]);
+
+      btnRace.disabled = false;
+      btnRace.innerHTML = `
+        <svg class="w-4 h-4 text-slate-950" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clip-rule="evenodd"/></svg>
+        <span>⚡ Testar Corrida Concorrente (Race Condition)</span>
+      `;
+    }
+
+    // Run on startup
+    window.addEventListener("DOMContentLoaded", inicializarApp);
+  </script>
 </body>
 </html>
