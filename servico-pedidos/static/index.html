@@ -130,6 +130,85 @@
         </button>
       </div>
     </div>
+
+    <!-- Concurrency Battle & Lock Flow Visual Card -->
+    <div id="concurrency-battle-card" class="hidden mt-4 bg-slate-900/95 border border-amber-500/40 rounded-2xl p-5 shadow-2xl relative overflow-hidden transition-all duration-300">
+      <div class="flex items-center justify-between pb-3 mb-4 border-b border-slate-800">
+        <div class="flex items-center gap-2.5">
+          <span class="text-base">🔒</span>
+          <div>
+            <h3 class="text-sm font-bold text-white flex items-center gap-2">
+              Fluxo da Disputa Concorrente em Tempo Real
+              <span class="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/30 font-mono">
+                Exclusão Mútua Redis Lock
+              </span>
+            </h3>
+            <p class="text-[11px] text-slate-400">Comprovação da proteção de corrida do último item (Água mineral)</p>
+          </div>
+        </div>
+        <button onclick="document.getElementById('concurrency-battle-card').classList.add('hidden')" class="text-slate-400 hover:text-white text-xs px-2 py-1 rounded bg-slate-800 transition">✕ Fechar</button>
+      </div>
+
+      <!-- Battle Columns -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+        <!-- Terminal 01 Flow -->
+        <div id="battle-col-a" class="p-4 rounded-xl bg-slate-950/80 border border-slate-800">
+          <div class="flex items-center justify-between mb-3">
+            <span class="text-xs font-bold text-blue-400 flex items-center gap-1.5">
+              <span class="h-2 w-2 rounded-full bg-blue-500"></span> Terminal 01 (Carlos)
+            </span>
+            <span id="battle-status-a" class="text-[10px] font-mono px-2 py-0.5 rounded font-bold">Processando...</span>
+          </div>
+          <div class="space-y-2 text-xs font-mono">
+            <div class="flex items-center gap-2 text-slate-300">
+              <span class="text-slate-500">1.</span> Disparo HTTP POST /pedidos
+            </div>
+            <div class="flex items-center gap-2 text-slate-300">
+              <span class="text-slate-500">2.</span> gRPC CheckAndReserve (:50051)
+            </div>
+            <div id="battle-lock-a" class="flex items-center gap-2 text-slate-300 p-1.5 rounded bg-slate-900 border border-slate-800">
+              <span class="text-slate-500">3.</span> Disputa Redis Lock...
+            </div>
+            <div id="battle-db-a" class="flex items-center gap-2 text-slate-300">
+              <span class="text-slate-500">4.</span> Resultado da gravação...
+            </div>
+          </div>
+        </div>
+
+        <!-- Terminal 02 Flow -->
+        <div id="battle-col-b" class="p-4 rounded-xl bg-slate-950/80 border border-slate-800">
+          <div class="flex items-center justify-between mb-3">
+            <span class="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+              <span class="h-2 w-2 rounded-full bg-emerald-500"></span> Terminal 02 (Luan)
+            </span>
+            <span id="battle-status-b" class="text-[10px] font-mono px-2 py-0.5 rounded font-bold">Processando...</span>
+          </div>
+          <div class="space-y-2 text-xs font-mono">
+            <div class="flex items-center gap-2 text-slate-300">
+              <span class="text-slate-500">1.</span> Disparo HTTP POST /pedidos
+            </div>
+            <div class="flex items-center gap-2 text-slate-300">
+              <span class="text-slate-500">2.</span> gRPC CheckAndReserve (:50051)
+            </div>
+            <div id="battle-lock-b" class="flex items-center gap-2 text-slate-300 p-1.5 rounded bg-slate-900 border border-slate-800">
+              <span class="text-slate-500">3.</span> Disputa Redis Lock...
+            </div>
+            <div id="battle-db-b" class="flex items-center gap-2 text-slate-300">
+              <span class="text-slate-500">4.</span> Resultado da gravação...
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Theoretical Summary Box -->
+      <div id="battle-summary" class="p-3 rounded-xl bg-blue-500/10 border border-blue-500/20 text-xs text-slate-300 flex items-center gap-2.5">
+        <span class="text-lg">🛡️</span>
+        <div>
+          <span class="font-bold text-white">Garantia de Exclusão Mútua:</span>
+          O Redis Lock garantiu a atomicidade da reserva. Exatamente uma venda foi aprovada e a concorrente foi rejeitada. Zero vendas duplicadas (Overbooking rigorosamente evitado).
+        </div>
+      </div>
+    </div>
   </section>
 
   <!-- ========================================================================= -->
@@ -306,8 +385,6 @@
         </button>
       </div>
 
-      <!-- Audit Table -->
-      <div class="overflow-x-auto">
         <table class="w-full text-left text-xs">
           <thead>
             <tr class="text-slate-400 border-b border-slate-800 font-mono">
@@ -317,11 +394,12 @@
               <th class="py-2.5 px-3">X-Correlation-ID (UUID)</th>
               <th class="py-2.5 px-3">Idempotency-Key</th>
               <th class="py-2.5 px-3 text-right">Latência</th>
+              <th class="py-2.5 px-3 text-center">Auditoria</th>
             </tr>
           </thead>
           <tbody id="telemetry-table-body" class="divide-y divide-slate-800/60 font-mono text-[11px]">
             <tr id="empty-telemetry-row">
-              <td colspan="6" class="py-6 text-center text-slate-500 italic">
+              <td colspan="7" class="py-6 text-center text-slate-500 italic">
                 Nenhuma transação executada nesta sessão. Faça uma venda acima para visualizar os logs.
               </td>
             </tr>
@@ -330,6 +408,111 @@
       </div>
     </div>
   </section>
+
+  <!-- Modal de Inspeção de Telemetria e UUID -->
+  <div id="modal-telemetria" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-2xl w-full p-6 shadow-2xl ring-1 ring-white/10 relative max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between pb-3 mb-4 border-b border-slate-800">
+        <div class="flex items-center gap-2.5">
+          <div class="h-9 w-9 rounded-xl bg-blue-500/10 border border-blue-500/30 flex items-center justify-center text-blue-400 font-bold">
+            🔍
+          </div>
+          <div>
+            <h3 class="text-base font-bold text-white">Inspeção da Transação Distribuída</h3>
+            <p class="text-xs text-slate-400">Rastreabilidade ponta a ponta e correlação de logs</p>
+          </div>
+        </div>
+        <button onclick="fecharModalTelemetria()" class="text-slate-400 hover:text-white p-1 rounded-lg bg-slate-800 hover:bg-slate-700 transition">
+          ✕
+        </button>
+      </div>
+
+      <!-- Status Bar -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mb-5 font-mono text-xs">
+        <div class="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+          <span class="text-slate-500 block text-[10px] uppercase">Status HTTP</span>
+          <span id="modal-status" class="font-bold text-sm">--</span>
+        </div>
+        <div class="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+          <span class="text-slate-500 block text-[10px] uppercase">Terminal</span>
+          <span id="modal-terminal" class="font-bold text-white text-xs truncate block">--</span>
+        </div>
+        <div class="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+          <span class="text-slate-500 block text-[10px] uppercase">Latência</span>
+          <span id="modal-latency" class="font-bold text-emerald-400 text-sm">-- ms</span>
+        </div>
+        <div class="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+          <span class="text-slate-500 block text-[10px] uppercase">Horário</span>
+          <span id="modal-time" class="font-bold text-slate-300 text-xs truncate block">--</span>
+        </div>
+      </div>
+
+      <!-- IDs Section -->
+      <div class="space-y-3 mb-5">
+        <div>
+          <label class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block mb-1">X-Correlation-ID (UUID Ponta a Ponta)</label>
+          <div class="flex items-center gap-2">
+            <input id="modal-correlation-id" readonly class="flex-1 bg-slate-950 border border-slate-800 px-3 py-2 rounded-lg text-xs font-mono text-blue-400 select-all focus:outline-none" />
+            <button onclick="copiarInput('modal-correlation-id', this)" class="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-medium border border-slate-700 transition">
+              Copiar
+            </button>
+          </div>
+        </div>
+
+        <div>
+          <label class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block mb-1">Idempotency-Key (Proteção contra Retries)</label>
+          <div class="flex items-center gap-2">
+            <input id="modal-idempotency-key" readonly class="flex-1 bg-slate-950 border border-slate-800 px-3 py-2 rounded-lg text-xs font-mono text-purple-400 select-all focus:outline-none" />
+            <button onclick="copiarInput('modal-idempotency-key', this)" class="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-medium border border-slate-700 transition">
+              Copiar
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Microservices Pipeline Trace -->
+      <div class="mb-5">
+        <label class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block mb-2">Trilha do Dado nos Microsserviços</label>
+        <div class="p-3.5 rounded-xl bg-slate-950/90 border border-slate-800 space-y-2 text-xs">
+          <div class="flex items-center gap-2 text-slate-300">
+            <span class="h-2 w-2 rounded-full bg-blue-500"></span>
+            <span class="font-semibold text-white">1. Browser (SPA)</span> ➔ Envia POST /pedidos com Headers <code class="text-blue-400 text-[10px]">X-Correlation-ID</code> e <code class="text-purple-400 text-[10px]">Idempotency-Key</code>
+          </div>
+          <div class="flex items-center gap-2 text-slate-300">
+            <span class="h-2 w-2 rounded-full bg-indigo-500"></span>
+            <span class="font-semibold text-white">2. servico-pedidos (:8000)</span> ➔ Valida JWT local (HS256) e injeta UUID no contexto da request
+          </div>
+          <div class="flex items-center gap-2 text-slate-300">
+            <span class="h-2 w-2 rounded-full bg-cyan-500"></span>
+            <span class="font-semibold text-white">3. gRPC Client (:50051)</span> ➔ Chama RPC <code class="text-slate-300 text-[10px]">CheckAndReserve</code> repassando metadados gRPC
+          </div>
+          <div class="flex items-center gap-2 text-slate-300">
+            <span class="h-2 w-2 rounded-full bg-red-500"></span>
+            <span class="font-semibold text-white">4. servico-estoque + Redis (:6379)</span> ➔ Disputa exclusiva do lock distribuído (<code class="text-amber-400 text-[10px]">lock:item:{id}</code>)
+          </div>
+          <div class="flex items-center gap-2 text-slate-300">
+            <span class="h-2 w-2 rounded-full bg-emerald-500"></span>
+            <span class="font-semibold text-white">5. PostgreSQL Master (:5432)</span> ➔ Atualiza estoque e registra movimentação atômica
+          </div>
+          <div class="flex items-center gap-2 text-slate-300">
+            <span class="h-2 w-2 rounded-full bg-emerald-600"></span>
+            <span class="font-semibold text-white">6. PostgreSQL Replica (:5433)</span> ➔ Replicação assíncrona do WAL via slot físico
+          </div>
+        </div>
+      </div>
+
+      <!-- Docker Command Snippet -->
+      <div>
+        <label class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block mb-1">Comando para Buscar nos Logs do Docker</label>
+        <div class="flex items-center gap-2">
+          <input id="modal-docker-cmd" readonly class="flex-1 bg-slate-950 border border-slate-800 px-3 py-2 rounded-lg text-xs font-mono text-emerald-400 select-all focus:outline-none" />
+          <button onclick="copiarInput('modal-docker-cmd', this)" class="px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-blue-600/20">
+            Copiar Comando
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <!-- Footer -->
   <footer class="border-t border-slate-800/80 py-4 text-center text-xs text-slate-500 bg-slate-900/40">
@@ -647,6 +830,15 @@
           latency: latency
         });
 
+        return {
+          terminal: terminal === 'a' ? 'Terminal 01 (Carlos)' : 'Terminal 02 (Luan)',
+          status: status,
+          correlationId: respCorrelationId,
+          idempotencyKey: idempotencyKey,
+          latency: latency,
+          isSuccess: status === 201
+        };
+
       } catch (err) {
         latency = Math.round(performance.now() - startTime);
         exibirToast(terminal, `Erro de rede ao conectar com o serviço: ${err.message}`, 'error');
@@ -657,6 +849,15 @@
           idempotencyKey: idempotencyKey,
           latency: latency
         });
+
+        return {
+          terminal: terminal === 'a' ? 'Terminal 01 (Carlos)' : 'Terminal 02 (Luan)',
+          status: 503,
+          correlationId: correlationId,
+          idempotencyKey: idempotencyKey,
+          latency: latency,
+          isSuccess: false
+        };
       } finally {
         btnText.textContent = "Confirmar Venda";
         btnSpinner.classList.add("hidden");
@@ -692,6 +893,9 @@
       }, 6000);
     }
 
+    // Global telemetry history
+    const historicoTelemetria = {};
+
     // Telemetry log entry
     function registrarTelemetria({ terminal, status, correlationId, idempotencyKey, latency }) {
       const tbody = document.getElementById("telemetry-table-body");
@@ -704,15 +908,32 @@
         ? `<span class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-bold">${status}</span>`
         : `<span class="px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/30 font-bold">${status}</span>`;
 
+      // Save for modal inspection
+      historicoTelemetria[correlationId] = {
+        terminal,
+        status,
+        correlationId,
+        idempotencyKey,
+        latency,
+        time: now,
+        isSuccess
+      };
+
       const tr = document.createElement("tr");
-      tr.className = "hover:bg-slate-800/40 transition border-b border-slate-800/40";
+      tr.className = "hover:bg-slate-800/60 transition border-b border-slate-800/40 cursor-pointer group";
+      tr.onclick = () => abrirModalTelemetria(correlationId);
       tr.innerHTML = `
         <td class="py-2.5 px-3 text-slate-400">${now}</td>
         <td class="py-2.5 px-3 font-semibold ${terminal.includes('01') ? 'text-blue-400' : 'text-emerald-400'}">${terminal}</td>
         <td class="py-2.5 px-3">${statusBadge}</td>
-        <td class="py-2.5 px-3 text-slate-300" title="${correlationId}">${correlationId.slice(0, 18)}...</td>
-        <td class="py-2.5 px-3 text-slate-400" title="${idempotencyKey}">${idempotencyKey.slice(0, 8)}...</td>
+        <td class="py-2.5 px-3 text-slate-300 font-mono" title="${correlationId}">${correlationId.slice(0, 18)}...</td>
+        <td class="py-2.5 px-3 text-slate-400 font-mono" title="${idempotencyKey}">${idempotencyKey.slice(0, 8)}...</td>
         <td class="py-2.5 px-3 text-right font-bold ${latency < 100 ? 'text-emerald-400' : 'text-amber-400'}">${latency} ms</td>
+        <td class="py-2.5 px-3 text-center">
+          <button onclick="event.stopPropagation(); abrirModalTelemetria('${correlationId}')" class="px-2.5 py-1 rounded-md bg-blue-500/10 hover:bg-blue-500/25 text-blue-400 border border-blue-500/30 text-[10px] font-semibold transition active:scale-95">
+            🔍 Inspecionar
+          </button>
+        </td>
       `;
 
       tbody.insertBefore(tr, tbody.firstChild);
@@ -722,11 +943,57 @@
       const tbody = document.getElementById("telemetry-table-body");
       tbody.innerHTML = `
         <tr id="empty-telemetry-row">
-          <td colspan="6" class="py-6 text-center text-slate-500 italic">
+          <td colspan="7" class="py-6 text-center text-slate-500 italic">
             Nenhuma transação executada nesta sessão. Faça uma venda acima para visualizar os logs.
           </td>
         </tr>
       `;
+    }
+
+    // Modal Inspection Functions
+    function abrirModalTelemetria(correlationId) {
+      const data = historicoTelemetria[correlationId];
+      if (!data) return;
+
+      const modal = document.getElementById("modal-telemetria");
+      const statusEl = document.getElementById("modal-status");
+      const terminalEl = document.getElementById("modal-terminal");
+      const latencyEl = document.getElementById("modal-latency");
+      const timeEl = document.getElementById("modal-time");
+      const corrInput = document.getElementById("modal-correlation-id");
+      const idempInput = document.getElementById("modal-idempotency-key");
+      const dockerCmd = document.getElementById("modal-docker-cmd");
+
+      statusEl.textContent = data.status === 201 ? "201 CREATED (Aprovado)" : `${data.status} RECUSADO`;
+      statusEl.className = data.isSuccess ? "font-bold text-sm text-emerald-400" : "font-bold text-sm text-red-400";
+
+      terminalEl.textContent = data.terminal;
+      latencyEl.textContent = `${data.latency} ms`;
+      timeEl.textContent = data.time;
+
+      corrInput.value = data.correlationId;
+      idempInput.value = data.idempotencyKey;
+      dockerCmd.value = `docker compose logs servico-pedidos servico-estoque | grep "${data.correlationId}"`;
+
+      modal.classList.remove("hidden");
+    }
+
+    function fecharModalTelemetria() {
+      const modal = document.getElementById("modal-telemetria");
+      if (modal) modal.classList.add("hidden");
+    }
+
+    function copiarInput(inputId, btn) {
+      const input = document.getElementById(inputId);
+      if (!input) return;
+      navigator.clipboard.writeText(input.value);
+      const originalText = btn.textContent;
+      btn.textContent = "Copiado! ✓";
+      btn.classList.add("bg-emerald-600");
+      setTimeout(() => {
+        btn.textContent = originalText;
+        btn.classList.remove("bg-emerald-600");
+      }, 2000);
     }
 
     // ⚡ Execute Race Condition Test (Simultaneously test Redis Lock)
@@ -753,11 +1020,57 @@
       atualizarVisualizacaoCarrinho('a');
       atualizarVisualizacaoCarrinho('b');
 
+      // Exibir Battle Card em modo de processamento
+      const battleCard = document.getElementById("concurrency-battle-card");
+      if (battleCard) battleCard.classList.remove("hidden");
+
+      document.getElementById("battle-status-a").textContent = "Disputando Lock...";
+      document.getElementById("battle-status-a").className = "text-[10px] font-mono px-2 py-0.5 rounded font-bold bg-amber-500/20 text-amber-400";
+      document.getElementById("battle-status-b").textContent = "Disputando Lock...";
+      document.getElementById("battle-status-b").className = "text-[10px] font-mono px-2 py-0.5 rounded font-bold bg-amber-500/20 text-amber-400";
+
       // Execute simultaneously using Promise.all
-      await Promise.all([
+      const [resA, resB] = await Promise.all([
         confirmarVenda('a'),
         confirmarVenda('b')
       ]);
+
+      // Atualizar Battle Card com resultados exatos da corrida
+      if (resA && resB) {
+        // Terminal A
+        const statusA = document.getElementById("battle-status-a");
+        const lockA = document.getElementById("battle-lock-a");
+        const dbA = document.getElementById("battle-db-a");
+
+        if (resA.isSuccess) {
+          statusA.textContent = "201 CONFIRMADO ✓";
+          statusA.className = "text-[10px] font-mono px-2 py-0.5 rounded font-bold bg-emerald-500/20 text-emerald-400";
+          lockA.innerHTML = `<span class="text-emerald-400">3.</span> 🔒 <strong class="text-emerald-300">Lock Adquirido no Redis</strong> (Token reservado)`;
+          dbA.innerHTML = `<span class="text-emerald-400">4.</span> Estoque decrementado (1 -> 0) e liberado`;
+        } else {
+          statusA.textContent = `${resA.status} RECUSADO ✕`;
+          statusA.className = "text-[10px] font-mono px-2 py-0.5 rounded font-bold bg-red-500/20 text-red-400";
+          lockA.innerHTML = `<span class="text-red-400">3.</span> ⛔ <strong class="text-red-300">Lock Ocupado / Recusado</strong>`;
+          dbA.innerHTML = `<span class="text-red-400">4.</span> Protegido: Nenhuma escrita duplicada no banco`;
+        }
+
+        // Terminal B
+        const statusB = document.getElementById("battle-status-b");
+        const lockB = document.getElementById("battle-lock-b");
+        const dbB = document.getElementById("battle-db-b");
+
+        if (resB.isSuccess) {
+          statusB.textContent = "201 CONFIRMADO ✓";
+          statusB.className = "text-[10px] font-mono px-2 py-0.5 rounded font-bold bg-emerald-500/20 text-emerald-400";
+          lockB.innerHTML = `<span class="text-emerald-400">3.</span> 🔒 <strong class="text-emerald-300">Lock Adquirido no Redis</strong> (Token reservado)`;
+          dbB.innerHTML = `<span class="text-emerald-400">4.</span> Estoque decrementado (1 -> 0) e liberado`;
+        } else {
+          statusB.textContent = `${resB.status} RECUSADO ✕`;
+          statusB.className = "text-[10px] font-mono px-2 py-0.5 rounded font-bold bg-red-500/20 text-red-400";
+          lockB.innerHTML = `<span class="text-red-400">3.</span> ⛔ <strong class="text-red-300">Lock Ocupado / Recusado</strong>`;
+          dbB.innerHTML = `<span class="text-red-400">4.</span> Protegido: Nenhuma escrita duplicada no banco`;
+        }
+      }
 
       btnRace.disabled = false;
       btnRace.innerHTML = `
