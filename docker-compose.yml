@@ -164,6 +164,8 @@ services:
       AWS_ENDPOINT_URL: http://localstack:4566
       SQS_QUEUE_PEDIDOS: caixanamao-pedidos-criados
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - ./servico-pedidos/static:/app/static:ro
     depends_on:
       postgres:
         condition: service_healthy
