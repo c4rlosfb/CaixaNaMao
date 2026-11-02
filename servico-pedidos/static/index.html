@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CaixaNaMão — Terminal do Ambulante</title>
+  <meta name="description" content="CaixaNaMão: Sistema Distribuído para Controle de Vendas e Estoque Concorrente em Tempo Real." />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+          },
+          colors: {
+            brand: {
+              50: '#eff6ff',
+              500: '#3b82f6',
+              600: '#2563eb',
+              700: '#1d4ed8',
+            }
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen font-sans flex flex-col antialiased selection:bg-brand-500 selection:text-white">
+
+  <!-- Header Global -->
+  <header class="border-b border-slate-800/80 bg-slate-900/60 backdrop-blur sticky top-0 z-50 px-6 py-4 flex items-center justify-between">
+    <div class="flex items-center space-x-3">
+      <div class="h-9 w-9 rounded-lg bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center font-bold text-white shadow-lg shadow-blue-500/20">
+        ⚡
+      </div>
+      <div>
+        <h1 class="text-lg font-bold tracking-tight text-white flex items-center gap-2">
+          CaixaNaMão
+          <span class="text-xs px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 font-medium">Sprint 3</span>
+        </h1>
+        <p class="text-xs text-slate-400">Terminal do Ambulante • Sistemas Distribuídos</p>
+      </div>
+    </div>
+    <div class="flex items-center space-x-4">
+      <div class="flex items-center gap-2 text-xs text-slate-400 bg-slate-800/50 px-3 py-1.5 rounded-md border border-slate-700/50">
+        <span class="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
+        <span>servico-pedidos :8000</span>
+      </div>
+      <a href="/docs" target="_blank" class="text-xs text-slate-300 hover:text-white transition-colors bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-md border border-slate-700 font-medium">
+        Swagger / API Docs ↗
+      </a>
+    </div>
+  </header>
+
+  <!-- Container Principal -->
+  <main class="flex-1 max-w-7xl w-full mx-auto p-6 flex flex-col gap-6">
+    <div class="bg-gradient-to-r from-slate-900 to-slate-850 rounded-xl border border-slate-800 p-6 shadow-xl">
+      <h2 class="text-xl font-bold text-white mb-2">Ambiente de Demonstração e Venda Simultânea</h2>
+      <p class="text-sm text-slate-400">
+        Interface gráfica configurada para demonstração prática de concorrência distribuída com exclusão mútua via <strong>Redis Lock</strong> e rastreabilidade transacional de ponta a ponta com <strong>UUID</strong>.
+      </p>
+    </div>
+
+    <!-- Terminais Split-Screen Container (Issue #37) -->
+    <div id="terminals-container" class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <!-- Terminal Vendedor A -->
+      <section class="bg-slate-900/90 rounded-xl border border-slate-800 p-6 flex flex-col shadow-lg">
+        <div class="flex items-center justify-between pb-4 border-b border-slate-800">
+          <div>
+            <span class="text-xs font-semibold uppercase tracking-wider text-blue-400">Terminal 01</span>
+            <h3 class="text-base font-bold text-white">Vendedor A (Carlos)</h3>
+          </div>
+          <span class="text-xs px-2.5 py-1 rounded bg-slate-800 text-slate-300 border border-slate-700 font-mono">JWT: Carlos</span>
+        </div>
+        <div class="py-6 flex flex-col items-center justify-center text-center text-slate-500 space-y-2">
+          <div class="p-3 rounded-full bg-slate-800/60 text-slate-400">📦</div>
+          <p class="text-sm">Catálogo e carrinho carregando via API...</p>
+        </div>
+      </section>
+
+      <!-- Terminal Vendedor B -->
+      <section class="bg-slate-900/90 rounded-xl border border-slate-800 p-6 flex flex-col shadow-lg">
+        <div class="flex items-center justify-between pb-4 border-b border-slate-800">
+          <div>
+            <span class="text-xs font-semibold uppercase tracking-wider text-emerald-400">Terminal 02</span>
+            <h3 class="text-base font-bold text-white">Vendedor B (Eduardo / Luan)</h3>
+          </div>
+          <span class="text-xs px-2.5 py-1 rounded bg-slate-800 text-slate-300 border border-slate-700 font-mono">JWT: Luan</span>
+        </div>
+        <div class="py-6 flex flex-col items-center justify-center text-center text-slate-500 space-y-2">
+          <div class="p-3 rounded-full bg-slate-800/60 text-slate-400">📦</div>
+          <p class="text-sm">Catálogo e carrinho carregando via API...</p>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <footer class="border-t border-slate-800 text-center py-4 text-xs text-slate-500 bg-slate-900/40">
+    CaixaNaMão • Projeto Integrador / Sistemas Distribuídos • Sprint 3
+  </footer>
+
+</body>
+</html>

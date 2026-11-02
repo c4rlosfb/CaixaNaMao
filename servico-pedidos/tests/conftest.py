@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.clients.estoque_client import (
     EstoqueClient,
+    ItemEstoqueResult,
     ReleaseResult,
     ReservaResult,
     StatusReserva,
@@ -79,7 +80,7 @@ async def db_session(session_factory) -> AsyncGenerator[AsyncSession, None]:
 
 @pytest.fixture
 def mock_estoque_ok() -> EstoqueClient:
-    """Simula estoque com reserva sempre bem-sucedida."""
+    """Simula estoque com reserva sempre bem-sucedida e saldos disponíveis."""
     mock = MagicMock(spec=EstoqueClient)
     mock.check_and_reserve = AsyncMock(
         return_value=ReservaResult(sucesso=True, status=StatusReserva.CONFIRMADO, mensagem="OK")
@@ -87,12 +88,22 @@ def mock_estoque_ok() -> EstoqueClient:
     mock.release_reserva = AsyncMock(
         return_value=ReleaseResult(sucesso=True, mensagem="Liberado")
     )
+
+    async def _consultar(item_id: uuid.UUID) -> ItemEstoqueResult | None:
+        return ItemEstoqueResult(
+            item_id=item_id,
+            nome="Item Teste",
+            quantidade_disponivel=10,
+            quantidade_reservada=0,
+        )
+
+    mock.consultar_item = AsyncMock(side_effect=_consultar)
     return mock
 
 
 @pytest.fixture
 def mock_estoque_insuficiente() -> EstoqueClient:
-    """Simula estoque insuficiente."""
+    """Simula estoque insuficiente e saldo zerado."""
     mock = MagicMock(spec=EstoqueClient)
     mock.check_and_reserve = AsyncMock(
         return_value=ReservaResult(
@@ -102,6 +113,16 @@ def mock_estoque_insuficiente() -> EstoqueClient:
         )
     )
     mock.release_reserva = AsyncMock(return_value=ReleaseResult(sucesso=True, mensagem="OK"))
+
+    async def _consultar_zerado(item_id: uuid.UUID) -> ItemEstoqueResult | None:
+        return ItemEstoqueResult(
+            item_id=item_id,
+            nome="Item Sem Estoque",
+            quantidade_disponivel=0,
+            quantidade_reservada=0,
+        )
+
+    mock.consultar_item = AsyncMock(side_effect=_consultar_zerado)
     return mock
 
 
