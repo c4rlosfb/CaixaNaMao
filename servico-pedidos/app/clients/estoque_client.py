@@ -56,6 +56,14 @@ class ReleaseResult:
     mensagem: str
 
 
+@dataclass
+class ItemEstoqueResult:
+    item_id: uuid.UUID
+    nome: str
+    quantidade_disponivel: int
+    quantidade_reservada: int
+
+
 class EstoqueClient:
     """Wrapper sobre o stub gRPC do EstoqueService."""
 
@@ -140,6 +148,33 @@ class EstoqueClient:
         except grpc.aio.AioRpcError as exc:
             logger.error("gRPC ReleaseReserva falhou: %s", exc)
             return ReleaseResult(sucesso=False, mensagem=str(exc))
+
+    async def consultar_item(self, item_id: uuid.UUID) -> ItemEstoqueResult | None:
+        """Consulta os dados e saldo atual de um item no servico-estoque via gRPC."""
+        if not self._available or self._stub is None:
+            logger.warning("Serviço de estoque indisponível para consulta de item %s", item_id)
+            return None
+        try:
+            from app.clients import estoque_pb2  # type: ignore[import]
+
+            request = estoque_pb2.ItemRequest(item_id=str(item_id))
+            metadata = obter_metadados_grpc()
+            response = await self._stub.ConsultarItem(request, timeout=5.0, metadata=metadata)
+            return ItemEstoqueResult(
+                item_id=uuid.UUID(response.item_id),
+                nome=response.nome,
+                quantidade_disponivel=response.quantidade_disponivel,
+                quantidade_reservada=response.quantidade_reservada,
+            )
+        except grpc.aio.AioRpcError as exc:
+            if exc.code() == grpc.StatusCode.NOT_FOUND:
+                logger.info("Item %s não encontrado no estoque", item_id)
+                return None
+            logger.error("gRPC ConsultarItem falhou para o item %s: %s", item_id, exc)
+            return None
+        except Exception as exc:
+            logger.error("Erro inesperado ao consultar item %s: %s", item_id, exc)
+            return None
 
     async def close(self) -> None:
         await self._channel.close()

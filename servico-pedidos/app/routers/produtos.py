@@ -1,0 +1,77 @@
+"""Router de produtos — consulta de catálogo e saldos de estoque via gRPC."""
+
+from __future__ import annotations
+
+import asyncio
+import uuid
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, status
+
+from app.clients.estoque_client import EstoqueClient, get_estoque_client
+from app.schemas.produto import CATALOGO_PRODUTOS, CATALOGO_PRODUTOS_MAP, ProdutoResponse
+
+router = APIRouter(prefix="/produtos", tags=["produtos"])
+
+EstoqueDep = Annotated[EstoqueClient, Depends(get_estoque_client)]
+
+
+@router.get(
+    "",
+    response_model=list[ProdutoResponse],
+    summary="Lista os produtos do catálogo com saldo atual de estoque",
+    description=(
+        "Retorna a lista dos 4 produtos base do catálogo (seed_dev.sql), "
+        "consultando o saldo de estoque atual de cada um via gRPC no servico-estoque."
+    ),
+)
+async def listar_produtos(
+    estoque: EstoqueDep,
+) -> list[ProdutoResponse]:
+    """Retorna os produtos com os saldos atualizados de estoque em tempo real."""
+    async def _montar_produto(base: dict) -> ProdutoResponse:
+        resumo = await estoque.consultar_item(base["id"])
+        qtd_disponivel = resumo.quantidade_disponivel if resumo else 0
+        qtd_reservada = resumo.quantidade_reservada if resumo else 0
+        return ProdutoResponse(
+            id=base["id"],
+            nome=base["nome"],
+            descricao=base["descricao"],
+            preco=base["preco"],
+            quantidade_disponivel=qtd_disponivel,
+            quantidade_reservada=qtd_reservada,
+        )
+
+    produtos = await asyncio.gather(*[_montar_produto(p) for p in CATALOGO_PRODUTOS])
+    return list(produtos)
+
+
+@router.get(
+    "/{produto_id}",
+    response_model=ProdutoResponse,
+    summary="Consulta os detalhes e saldo de um produto específico",
+)
+async def get_produto(
+    produto_id: uuid.UUID,
+    estoque: EstoqueDep,
+) -> ProdutoResponse:
+    """Busca um produto no catálogo e seu saldo atual no estoque."""
+    base = CATALOGO_PRODUTOS_MAP.get(produto_id)
+    if not base:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Produto {produto_id} não encontrado no catálogo",
+        )
+
+    resumo = await estoque.consultar_item(produto_id)
+    qtd_disponivel = resumo.quantidade_disponivel if resumo else 0
+    qtd_reservada = resumo.quantidade_reservada if resumo else 0
+
+    return ProdutoResponse(
+        id=base["id"],
+        nome=base["nome"],
+        descricao=base["descricao"],
+        preco=base["preco"],
+        quantidade_disponivel=qtd_disponivel,
+        quantidade_reservada=qtd_reservada,
+    )
