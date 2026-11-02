@@ -84,9 +84,9 @@
 
     <!-- Health indicators & Action controls -->
     <div class="flex items-center flex-wrap gap-2.5">
-      <button id="btn-sync-estoque" onclick="recarregarCatalogo()" class="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-300 bg-slate-800/80 hover:bg-slate-700 hover:text-white rounded-lg border border-slate-700 transition shadow-sm active:scale-95" title="Recarregar catálogo e saldos de estoque">
+      <button id="btn-sync-estoque" onclick="recarregarCatalogo(true)" class="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-300 bg-slate-800/80 hover:bg-slate-700 hover:text-white rounded-lg border border-slate-700 transition shadow-sm active:scale-95" title="Recarregar catálogo e saldos de estoque">
         <svg id="icon-refresh" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-        <span>Atualizar Estoque</span>
+        <span id="btn-sync-text">Atualizar Estoque</span>
       </button>
 
       <div class="flex items-center gap-2 text-xs text-slate-300 bg-slate-900/90 px-3 py-1.5 rounded-lg border border-slate-800">
@@ -396,22 +396,38 @@
     }
 
     // Fetch Products Catalog & Stock via GET /produtos
-    async function recarregarCatalogo() {
+    async function recarregarCatalogo(manual = false) {
       const icon = document.getElementById("icon-refresh");
+      const btnText = document.getElementById("btn-sync-text");
       if (icon) icon.classList.add("animate-spin");
+      if (manual && btnText) btnText.textContent = "Sincronizando...";
 
+      const startTime = Date.now();
       try {
         const res = await fetch("/produtos");
-        if (!res.ok) throw new Error("Erro ao consultar catálogo");
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         produtosCatalogo = await res.json();
         renderizarCatalogo('a');
         renderizarCatalogo('b');
         atualizarVisualizacaoCarrinho('a');
         atualizarVisualizacaoCarrinho('b');
+
+        if (manual) {
+          const totalDisponivel = produtosCatalogo.reduce((acc, p) => acc + (p.quantidade_disponivel || 0), 0);
+          exibirToast('a', `🔄 Catálogo e saldos atualizados com sucesso via gRPC (${totalDisponivel} un no estoque total)!`, 'info');
+        }
       } catch (err) {
         console.error("Erro ao carregar catálogo:", err);
+        if (manual) {
+          exibirToast('a', `❌ Falha ao atualizar estoque: ${err.message}`, 'error');
+        }
       } finally {
-        if (icon) icon.classList.remove("animate-spin");
+        const elapsed = Date.now() - startTime;
+        const delay = Math.max(0, 500 - elapsed);
+        setTimeout(() => {
+          if (icon) icon.classList.remove("animate-spin");
+          if (btnText) btnText.textContent = "Atualizar Estoque";
+        }, delay);
       }
     }
 
