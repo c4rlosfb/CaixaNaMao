@@ -70,12 +70,13 @@ STATIC_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
-@app.get("/", include_in_schema=False)
-async def root() -> FileResponse | dict[str, str]:
+@app.get("/", include_in_schema=False, response_model=None)
+async def root():
     index_path = STATIC_DIR / "index.html"
     if index_path.exists():
         return FileResponse(index_path, media_type="text/html")
     return {"message": "CaixaNaMão — Serviço de Pedidos"}
+
 
 
 @app.get("/health", tags=["health"], summary="Health check")
