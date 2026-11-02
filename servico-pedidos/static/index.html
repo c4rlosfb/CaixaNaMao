@@ -722,6 +722,11 @@
         return;
       }
 
+      if (itemAgua.quantidade_disponivel <= 0) {
+        exibirToast('a', "⚠️ O estoque de Água mineral já está zerado (0 un). Para demonstrar novamente, resete o saldo com: docker compose exec -T postgres psql -U postgres -d estoque_db < scripts/seed_dev.sql", 'warning');
+        exibirToast('b', "⚠️ O estoque de Água mineral já está zerado (0 un). Para demonstrar novamente, resete o saldo com: docker compose exec -T postgres psql -U postgres -d estoque_db < scripts/seed_dev.sql", 'warning');
+      }
+
       const btnRace = document.getElementById("btn-race-condition");
       btnRace.disabled = true;
       btnRace.innerHTML = `<span>⚡ Disparando Race Condition concorrente...</span>`;

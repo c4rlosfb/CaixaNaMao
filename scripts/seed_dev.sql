@@ -21,4 +21,8 @@ VALUES
      'Lata 350ml gelada', 6.00, 20, 0),
     ('44444444-4444-4444-4444-444444444444', 'Água mineral',
      'Garrafa 500ml — estoque unitário para o teste de concorrência', 3.00, 1, 0)
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (id) DO UPDATE SET
+    quantidade_disponivel = EXCLUDED.quantidade_disponivel,
+    quantidade_reservada = EXCLUDED.quantidade_reservada,
+    preco = EXCLUDED.preco;
+
