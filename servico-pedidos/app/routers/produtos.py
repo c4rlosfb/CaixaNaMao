@@ -114,3 +114,30 @@ async def get_produto(
         quantidade_reservada=qtd_reservada,
         estoque_disponivel=resumo is not None,
     )
+
+
+@router.post(
+    "/reestocar",
+    include_in_schema=False,
+    summary="Aciona o reestoque dos itens e limpeza de travas para demonstração",
+)
+async def reestocar_produtos() -> dict[str, str]:
+    """Chama o servico-estoque para reexecutar o seed de demonstração."""
+    import urllib.error
+    import urllib.request
+
+    url = f"http://{settings.estoque_grpc_host}:8002/reestocar"
+    try:
+        req = urllib.request.Request(url, data=b"", method="POST")
+
+        def _do_post():
+            with urllib.request.urlopen(req, timeout=5.0) as resp:
+                return resp.read()
+
+        await asyncio.to_thread(_do_post)
+        return {"status": "ok", "mensagem": "Estoque restaurado com sucesso"}
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Falha ao acionar reestoque no servico-estoque: {exc}",
+        )
