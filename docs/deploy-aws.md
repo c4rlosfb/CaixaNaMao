@@ -60,7 +60,7 @@ O `docker-compose.homolog.yml` faz uso da diretiva `!override` (disponível no D
 > - o **IP público muda a cada novo provisionamento** — nenhum endereço visto em prints, no corpo de PRs ou em mensagens da equipe deve ser tratado como fixo;
 > - **sempre confira o novo IP no painel da AWS** (EC2 → Instâncias → *Public IPv4 address*) **antes** de rodar o `curl`, abrir o Swagger ou mexer no Security Group;
 > - o deploy é refeito do zero a cada sessão: instância, Security Group, Swap (§4.3) e `bash scripts/deploy.sh`;
-> - se precisar de um endereço estável durante a apresentação, provisione a instância com antecedência e mantenha a sessão aberta — ou associe um **Elastic IP**, quando a conta do laboratório permitir.
+> - se precisar de um endereço estável durante a apresentação, provisione a instância com antecedência e mantenha a sessão aberta — ou utilize o DNS dinâmico configurado no projeto (**`caixanamao.duckdns.org`** via `scripts/duckdns_update.sh`), que sincroniza automaticamente o IP da máquina com o DuckDNS.
 
 ### 3.2 Regras de Firewall (Security Group)
 Crie um Security Group denominado `caixanamao-homolog-sg` contendo as seguintes regras de entrada (*Inbound Rules*):
