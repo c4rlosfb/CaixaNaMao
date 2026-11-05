@@ -249,8 +249,14 @@ async def test_estoque_client_consultar_item_cenarios(monkeypatch: pytest.Monkey
 
     # 3. NOT_FOUND -> retorna None
     class FakeRpcError(grpc.aio.AioRpcError):
-        def __init__(self, code: grpc.StatusCode) -> None:
-            self._code = code
+        def __init__(self, code: grpc.StatusCode, details: str = "fake error") -> None:
+            super().__init__(
+                code=code,
+                initial_metadata=(),
+                trailing_metadata=(),
+                details=details,
+                debug_error_string="",
+            )
 
         def code(self) -> grpc.StatusCode:
             return self._code
