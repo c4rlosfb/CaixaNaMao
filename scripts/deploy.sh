@@ -23,7 +23,7 @@ set -euo pipefail
 RAIZ="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$RAIZ"
 
-SERVICOS="${SERVICOS:-postgres redis servico-estoque servico-pedidos}"
+SERVICOS="${SERVICOS:-postgres replicacao-init postgres-replica redis servico-estoque servico-pedidos}"
 ESPERA_SEGUNDOS="${ESPERA_SEGUNDOS:-240}"
 COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.homolog.yml)
 
