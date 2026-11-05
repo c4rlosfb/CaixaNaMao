@@ -142,6 +142,18 @@ bash scripts/deploy.sh
   bash scripts/deploy.sh --down
   ```
 
+### 5.3 Inicialização Automática no Boot (Auto-Start via systemd)
+Para que a stack de containers inicie de forma transparente e 100% autônoma toda vez que a instância EC2 for ligada ou reiniciada (eliminando a necessidade de conexão SSH manual):
+
+1. **Instalação do serviço:**
+   ```bash
+   bash scripts/setup_autostart.sh
+   ```
+2. **Funcionamento:**
+   - O serviço gerenciador `caixanamao.service` aguarda o daemon do Docker e a conectividade de rede (`network-online.target`).
+   - Executa automaticamente `docker compose up -d` na inicialização do sistema operacional.
+   - Em conjunto com o DNS dinâmico do DuckDNS, a aplicação fica imediatamente disponível em `http://caixanamao.duckdns.org:8000/` após o boot da máquina.
+
 ---
 
 ## 6. Roteiro de Validação e Evidências
