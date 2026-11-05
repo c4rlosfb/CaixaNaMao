@@ -21,6 +21,9 @@
 services:
   servico-pedidos:
     restart: unless-stopped
+    environment:
+      # Em homologação (porta 8000 pública), desabilita a emissão pública de dev-tokens por padrão.
+      PERMITIR_DEV_TOKENS: ${PERMITIR_DEV_TOKENS:-false}
     ports: !override
       # Única porta pública: é a que está liberada no Security Group.
       - "0.0.0.0:8000:8000"
