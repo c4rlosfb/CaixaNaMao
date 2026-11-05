@@ -562,7 +562,12 @@
     // Initialize Application
     async function inicializarApp() {
       await carregarTokens();
-      await recarregarCatalogo();
+      await recarregarCatalogo(false);
+
+      // Sincronização automática em background a cada 2.5s entre diferentes máquinas/abas
+      setInterval(() => {
+        recarregarCatalogo(false);
+      }, 2500);
     }
 
     // Fetch JWT tokens from backend
@@ -582,7 +587,7 @@
     async function recarregarCatalogo(manual = false) {
       const icon = document.getElementById("icon-refresh");
       const btnText = document.getElementById("btn-sync-text");
-      if (icon) icon.classList.add("animate-spin");
+      if (manual && icon) icon.classList.add("animate-spin");
       if (manual && btnText) btnText.textContent = "Sincronizando...";
 
       const startTime = Date.now();
@@ -605,12 +610,14 @@
           exibirToast('a', `❌ Falha ao atualizar estoque: ${err.message}`, 'error');
         }
       } finally {
-        const elapsed = Date.now() - startTime;
-        const delay = Math.max(0, 500 - elapsed);
-        setTimeout(() => {
-          if (icon) icon.classList.remove("animate-spin");
-          if (btnText) btnText.textContent = "Atualizar Estoque";
-        }, delay);
+        if (manual) {
+          const elapsed = Date.now() - startTime;
+          const delay = Math.max(0, 500 - elapsed);
+          setTimeout(() => {
+            if (icon) icon.classList.remove("animate-spin");
+            if (btnText) btnText.textContent = "Atualizar Estoque";
+          }, delay);
+        }
       }
     }
 
