@@ -5,13 +5,16 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.clients.estoque_client import EstoqueClient, get_estoque_client
 from app.db import dispose_engine
-from app.routers import pedidos
+from app.routers import pedidos, produtos
 from app.telemetry import CorrelationMiddleware, configurar_logging
 
 configurar_logging()
@@ -59,8 +62,23 @@ app.add_middleware(
 )
 
 app.include_router(pedidos.router)
+app.include_router(produtos.router)
+
+STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+STATIC_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+
+@app.get("/", include_in_schema=False, response_model=None)
+async def root():
+    index_path = STATIC_DIR / "index.html"
+    if index_path.exists():
+        return FileResponse(index_path, media_type="text/html")
+    return {"message": "CaixaNaMão — Serviço de Pedidos"}
+
 
 
 @app.get("/health", tags=["health"], summary="Health check")
 async def health() -> dict[str, str]:
     return {"status": "ok", "service": "servico-pedidos"}
+

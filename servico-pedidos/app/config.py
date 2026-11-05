@@ -38,5 +38,8 @@ class Settings(BaseSettings):
     # --- Observabilidade ---
     log_level: str = "INFO"
 
+    # --- Demonstração / Desenvolvimento ---
+    permitir_dev_tokens: bool = False
+
 
 settings = Settings()
