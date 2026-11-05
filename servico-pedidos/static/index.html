@@ -84,9 +84,9 @@
 
     <!-- Health indicators & Action controls -->
     <div class="flex items-center flex-wrap gap-2.5">
-      <button id="btn-sync-estoque" onclick="recarregarCatalogo(true)" class="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-300 bg-slate-800/80 hover:bg-slate-700 hover:text-white rounded-lg border border-slate-700 transition shadow-sm active:scale-95" title="Recarregar catálogo e saldos de estoque">
-        <svg id="icon-refresh" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-        <span id="btn-sync-text">Atualizar Estoque</span>
+      <button id="btn-sync-estoque" onclick="reestocarEstoque()" class="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 rounded-lg border border-emerald-500/30 transition shadow-sm active:scale-95" title="Restaurar saldos de estoque e limpar travas para nova demonstração">
+        <svg id="icon-refresh" class="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+        <span id="btn-sync-text">Reestocar Itens</span>
       </button>
 
       <div class="flex items-center gap-2 text-xs text-slate-300 bg-slate-900/90 px-3 py-1.5 rounded-lg border border-slate-800">
@@ -568,6 +568,30 @@
       setInterval(() => {
         recarregarCatalogo(false);
       }, 2500);
+    }
+
+    // Trigger Restock via POST /produtos/reestocar
+    async function reestocarEstoque() {
+      const icon = document.getElementById("icon-refresh");
+      const btnText = document.getElementById("btn-sync-text");
+      if (icon) icon.classList.add("animate-spin");
+      if (btnText) btnText.textContent = "Reestocando...";
+
+      try {
+        const res = await fetch("/produtos/reestocar", { method: "POST" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        await recarregarCatalogo(false);
+        exibirToast('a', "✅ Estoque reestocado com sucesso! Água mineral = 1 un (pronta para nova corrida).", "success");
+        exibirToast('b', "✅ Estoque reestocado com sucesso! Água mineral = 1 un (pronta para nova corrida).", "success");
+      } catch (err) {
+        console.error("Erro ao reestocar:", err);
+        exibirToast('a', `❌ Falha ao reestocar: ${err.message}`, "error");
+      } finally {
+        setTimeout(() => {
+          if (icon) icon.classList.remove("animate-spin");
+          if (btnText) btnText.textContent = "Reestocar Itens";
+        }, 500);
+      }
     }
 
     // Fetch JWT tokens from backend

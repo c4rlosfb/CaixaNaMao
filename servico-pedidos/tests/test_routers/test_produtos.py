@@ -269,3 +269,36 @@ async def test_estoque_client_consultar_item_cenarios(monkeypatch: pytest.Monkey
     assert await cliente.consultar_item(item_id) is None
 
 
+# ---------------------------------------------------------------------------
+# POST /produtos/reestocar (Ação do botão de reestoque da UI)
+# ---------------------------------------------------------------------------
+
+async def test_reestocar_produtos_sucesso(client: AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verifica que POST /produtos/reestocar responde 200 quando o servico-estoque confirma."""
+    import urllib.request
+    from unittest.mock import MagicMock
+
+    mock_resp = MagicMock()
+    mock_resp.read.return_value = b'{"status": "ok"}'
+    mock_resp.__enter__.return_value = mock_resp
+
+    monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout=5.0: mock_resp)
+
+    response = await client.post("/produtos/reestocar")
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
+
+
+async def test_reestocar_produtos_falha(client: AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verifica que POST /produtos/reestocar responde 500 caso o servico-estoque falhe."""
+    import urllib.request
+
+    def _fail(req, timeout=5.0):
+        raise OSError("conexao recusada")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _fail)
+
+    response = await client.post("/produtos/reestocar")
+    assert response.status_code == 500
+
+

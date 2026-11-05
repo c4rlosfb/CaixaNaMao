@@ -10,6 +10,7 @@ para não expor informação operacional a quem alcança o endpoint.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 
 from fastapi import FastAPI, Response
@@ -64,5 +65,39 @@ def criar_app_health(
             return {"status": "indisponivel", "servico": "servico-estoque", "detalhes": problemas}
 
         return {"status": "ok", "servico": "servico-estoque"}
+
+    @app.post("/reestocar", tags=["demo"], summary="Restaura os saldos padrão para demonstração")
+    async def reestocar() -> dict[str, str]:
+        sql = text("""
+            INSERT INTO itens (id, nome, descricao, preco, quantidade_disponivel, quantidade_reservada)
+            VALUES
+                ('11111111-1111-1111-1111-111111111111', 'Coxinha',
+                 'Salgado de frango assado', 5.50, 10, 0),
+                ('22222222-2222-2222-2222-222222222222', 'Pastel de carne',
+                 'Pastel frito na hora', 7.00, 5, 0),
+                ('33333333-3333-3333-3333-333333333333', 'Refrigerante lata',
+                 'Lata 350ml gelada', 6.00, 20, 0),
+                ('44444444-4444-4444-4444-444444444444', 'Água mineral',
+                 'Garrafa 500ml — estoque unitário para o teste de concorrência', 3.00, 1, 0)
+            ON CONFLICT (id) DO UPDATE SET
+                quantidade_disponivel = EXCLUDED.quantidade_disponivel,
+                quantidade_reservada = EXCLUDED.quantidade_reservada,
+                preco = EXCLUDED.preco;
+        """)
+        async with session_factory() as session:
+            await session.execute(sql)
+            await session.commit()
+
+        # Limpar locks residuais no Redis
+        for item_id in [
+            "11111111-1111-1111-1111-111111111111",
+            "22222222-2222-2222-2222-222222222222",
+            "33333333-3333-3333-3333-333333333333",
+            "44444444-4444-4444-4444-444444444444",
+        ]:
+            with contextlib.suppress(Exception):
+                await redis_client.delete(f"lock:estoque:{item_id}")
+
+        return {"status": "ok", "mensagem": "Estoque restaurado com sucesso"}
 
     return app
