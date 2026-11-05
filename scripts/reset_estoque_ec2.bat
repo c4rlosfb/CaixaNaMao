@@ -18,7 +18,8 @@ if not exist "%KEY_PATH%" (
     exit /b 1
 )
 
-set "EC2_IP=54.160.220.71"
+set "EC2_IP=%~1"
+if "%EC2_IP%"=="" set "EC2_IP=caixanamao.duckdns.org"
 set "EC2_USER=ubuntu"
 
 echo Conectando na AWS EC2 (%EC2_IP%) e restaurando saldos do estoque...
